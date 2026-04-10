@@ -1,18 +1,98 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
   <title>FathomelessDog Games</title>
   <style>
-    body { font-family: Arial; background: #111; color: #eee; text-align: center; }
-    a { color: #4af; font-size: 20px; display: block; margin: 10px; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #0d0d0d, #1a1a1a);
+      color: #fff;
+      text-align: center;
+    }
+
+    header {
+      padding: 40px 20px;
+      background: #111;
+      border-bottom: 2px solid #333;
+    }
+
+    h1 {
+      font-size: 48px;
+      margin: 0;
+      letter-spacing: 2px;
+    }
+
+    p.subtitle {
+      font-size: 18px;
+      color: #aaa;
+      margin-top: 10px;
+    }
+
+    .game-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 25px;
+      padding: 40px;
+      max-width: 1000px;
+      margin: auto;
+    }
+
+    .game-card {
+      background: #181818;
+      padding: 20px;
+      border-radius: 12px;
+      transition: 0.2s;
+      border: 1px solid #333;
+    }
+
+    .game-card:hover {
+      transform: translateY(-5px);
+      border-color: #4af;
+      box-shadow: 0 0 15px #4af5;
+    }
+
+    .game-card a {
+      color: #4af;
+      text-decoration: none;
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    footer {
+      margin-top: 40px;
+      padding: 20px;
+      color: #666;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
-  <h1>Welcome to FathomelessDog's Game Site</h1>
-  <p>Select a game below:</p>
 
-  <a href="game1/amaze">Game 1</a>
-  <a href="game2/repo">Game 2</a>
+<header>
+  <h1>FathomelessDog Games</h1>
+  <p class="subtitle">Your hub for browser‑friendly games</p>
+</header>
+
+<div class="game-grid">
+  <div class="game-card">
+    <a href="game1/index.html">Game 1</a>
+  </div>
+
+  <div class="game-card">
+    <a href="game2/index.html">Game 2</a>
+  </div>
+
+  <div class="game-card">
+    <a href="game3/index.html">Game 3</a>
+  </div>
+</div>
+
+<footer>
+  © 2026 FathomelessDog — All rights reserved.
+</footer>
+
 </body>
 </html>
 
