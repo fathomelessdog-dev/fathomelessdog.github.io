@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geometry Dash Lite | DuckMath Classroom</title>
+    <meta name="description" content="Geometry Dash Lite themed lessons for DuckMath Classroom. Fast-paced geometry runs, timing challenges, and coordination drills.">
+    <style>
+        :root {
+            --primary-color: #d93025;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #3c4043;
+            --muted-text: #5f6368;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        header {
+            background-color: #fff;
+            padding: 15px 24px;
+            box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            font-size: 22px;
+            color: var(--muted-text);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo span {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 18px;
+            font-size: 14px;
+            color: var(--muted-text);
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 30px auto;
+            padding: 0 20px 40px;
+        }
+
+        .hero {
+            background: #fff;
+            border: 1px solid #dadce0;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 30px;
+        }
+
+        .hero h1 {
+            margin: 0 0 10px;
+            font-size: 28px;
+        }
+
+        .hero p {
+            margin: 0;
+            color: var(--muted-text);
+            line-height: 1.6;
+        }
+
+        .section-title {
+            font-size: 24px;
+            margin-bottom: 16px;
+            border-bottom: 2px solid #e8eaed;
+            padding-bottom: 10px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 24px;
+        }
+
+        .course-card {
+            background: var(--card-bg);
+            border: 1px solid #dadce0;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .course-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(60,64,67,0.1);
+        }
+
+        .card-header {
+            height: 100px;
+            padding: 16px;
+            color: #fff;
+            background-color: var(--primary-color);
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .card-subtitle {
+            font-size: 12px;
+            margin-top: 6px;
+            opacity: 0.9;
+        }
+
+        .card-body {
+            padding: 16px;
+            min-height: 110px;
+            position: relative;
+        }
+
+        .teacher-avatar {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background-color: #eee;
+            position: absolute;
+            top: -26px;
+            right: 16px;
+            border: 3px solid #fff;
+            background-size: cover;
+        }
+
+        .description {
+            margin: 0;
+            color: var(--muted-text);
+            line-height: 1.5;
+            font-size: 14px;
+        }
+
+        .btn-start {
+            display: inline-block;
+            margin-top: 16px;
+            color: var(--primary-color);
+            font-weight: 600;
+            text-decoration: none;
+            text-transform: uppercase;
+            font-size: 13px;
+        }
+
+        footer {
+            margin-top: 40px;
+            padding: 40px 20px;
+            background: #fff;
+            border-top: 1px solid #dadce0;
+            font-size: 14px;
+            color: var(--muted-text);
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <svg style="width:24px;height:24px;margin-right:10px" viewBox="0 0 24 24"><path fill="#5f6368" d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z" /></svg>
+            DuckMath <span>Classroom</span>
+        </div>
+        <div class="nav-links">
+            <a href="index.html">Home</a>
+            <a href="duckmath.html">DuckMath</a>
+            <a href="slope.html">Slope</a>
+            <a href="fnaf.html">FNAF</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="hero">
+            <h1>Geometry Dash Lite Tracks</h1>
+            <p>Geometry Dash Lite is one of the most searched themes next to DuckMath. Use this page to spotlight timing drills, rhythm-based jumps, and fast geometry runs.</p>
+        </section>
+
+        <section>
+            <div class="section-title">Featured Geometry Runs</div>
+            <div class="grid">
+                <div class="course-card">
+                    <div class="card-header">
+                        <div class="card-title">Lite Jump Circuit</div>
+                        <div class="card-subtitle">Period 1 · Timing Drills</div>
+                    </div>
+                    <div class="card-body">
+                        <div class="teacher-avatar" style="background-image: url('https://api.dicebear.com/7.x/bottts/svg?seed=jump');"></div>
+                        <p class="description">Introduce timing windows and rhythm precision to keep players engaged.</p>
+                        <a href="#" class="btn-start">Start Circuit</a>
+                    </div>
+                </div>
+
+                <div class="course-card">
+                    <div class="card-header">
+                        <div class="card-title">Dash Geometry Lab</div>
+                        <div class="card-subtitle">Period 2 · Shape Memory</div>
+                    </div>
+                    <div class="card-body">
+                        <div class="teacher-avatar" style="background-image: url('https://api.dicebear.com/7.x/bottts/svg?seed=shape');"></div>
+                        <p class="description">Focus on obstacle sequencing and shape recognition for repeatable practice.</p>
+                        <a href="slope.html" class="btn-start">Compare Slope</a>
+                    </div>
+                </div>
+
+                <div class="course-card">
+                    <div class="card-header">
+                        <div class="card-title">DuckMath Rhythm Boost</div>
+                        <div class="card-subtitle">Period 3 · Cross Training</div>
+                    </div>
+                    <div class="card-body">
+                        <div class="teacher-avatar" style="background-image: url('https://api.dicebear.com/7.x/bottts/svg?seed=rhythm');"></div>
+                        <p class="description">Bridge math game audiences with rhythm challenges and quick reactions.</p>
+                        <a href="duckmath.html" class="btn-start">Go to DuckMath</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <h2>Optimize Geometry Dash Lite Pages</h2>
+        <p>Write short, focused descriptions for each level. Keep it readable on Chromebooks and use clean navigation between DuckMath, Slope, and FNAF pages.</p>
+        <p style="font-size:12px; margin-top:20px; opacity:0.6;">© 2026 DuckMath Classroom. All rights reserved.</p>
+    </footer>
+</body>
+</html>
