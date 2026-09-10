@@ -1,40 +1,180 @@
 ```html
-<div class="game-card">
-    <div class="game-image">
-        Game Image
-    </div>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fathomeless Dog Games</title>
 
-    <h2>
-        <a href="games/game1.html">Game 1</a>
-    </h2>
-</div>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #111;
+            color: white;
+        }
 
-<style>
-.game-card {
-    background: #222;
-    width: 220px;
-    padding: 15px;
-    margin: 15px;
-    border-radius: 10px;
-}
+        /* Header */
+        header {
+            background: #222;
+            padding: 20px;
+            text-align: center;
+        }
 
-.game-image {
-    height: 130px;
-    background: #333;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #888;
-}
+        header h1 {
+            margin: 0;
+        }
 
-.game-card a {
-    color: white;
-    text-decoration: none;
-}
+        /* Navigation */
+        nav {
+            background: #333;
+            padding: 10px;
+            text-align: center;
+        }
 
-.game-card a:hover {
-    color: #4da6ff;
-}
-</style>
+        nav a {
+            color: white;
+            text-decoration: none;
+            margin: 0 15px;
+        }
+
+        nav a:hover {
+            color: #4da6ff;
+        }
+
+        /* Main */
+        main {
+            padding: 30px;
+            text-align: center;
+        }
+
+        main h2 {
+            margin-bottom: 30px;
+        }
+
+        /* Games */
+        .games {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        /* Game Card */
+        .game-card {
+            background: #222;
+            width: 220px;
+            padding: 15px;
+            margin: 15px;
+            border-radius: 10px;
+        }
+
+        .game-image {
+            height: 130px;
+            background: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            border-radius: 7px;
+        }
+
+        /* Only the game name is a link */
+        .game-card a {
+            color: white;
+            text-decoration: none;
+        }
+
+        .game-card a:hover {
+            color: #4da6ff;
+        }
+
+        /* Footer */
+        footer {
+            background: #222;
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            color: #888;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- HEADER -->
+    <header>
+        <h1>🐕 Fathomeless Dog Games</h1>
+    </header>
+
+    <!-- NAVIGATION -->
+    <nav>
+        <a href="index.html">Home</a>
+        <a href="new-games.html">New Games</a>
+        <a href="popular.html">Popular</a>
+        <a href="about.html">About</a>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main>
+
+        <h2>Games</h2>
+
+        <div class="games">
+
+            <!-- GAME 1 -->
+            <div class="game-card">
+                <div class="game-image">
+                    Game Image
+                </div>
+
+                <h3>
+                    <a href="games/game1.html">Game 1</a>
+                </h3>
+            </div>
+
+
+            <!-- GAME 2 -->
+            <div class="game-card">
+                <div class="game-image">
+                    Game Image
+                </div>
+
+                <h3>
+                    <a href="games/game2.html">Game 2</a>
+                </h3>
+            </div>
+
+
+            <!-- GAME 3 -->
+            <div class="game-card">
+                <div class="game-image">
+                    Game Image
+                </div>
+
+                <h3>
+                    <a href="games/game3.html">Game 3</a>
+                </h3>
+            </div>
+
+
+            <!-- EMPTY GAME CARD -->
+            <div class="game-card">
+                <div class="game-image">
+                    Game Image
+                </div>
+
+                <h3>
+                    <a href="games/game4.html">Game 4</a>
+                </h3>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer>
+        Fathomeless Dog Games © 2026
+    </footer>
+
+</body>
+</html>
 ```
-
