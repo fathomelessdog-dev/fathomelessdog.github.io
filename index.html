@@ -1,169 +1,773 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>GameHub</title>
+
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: #061326;
+    color: white;
+}
+
+/* =========================
+   TOP NAVIGATION
+========================= */
+
+.navbar {
+    height: 80px;
+    background: #0a1930;
+    border-bottom: 1px solid #172b49;
+
+    display: flex;
+    align-items: center;
+    padding: 0 35px;
+    gap: 50px;
+}
+
+.logo {
+    font-size: 30px;
+    font-weight: bold;
+    min-width: 260px;
+}
+
+.logo span {
+    color: #2196ff;
+}
+
+.nav-links {
+    display: flex;
+    gap: 35px;
+}
+
+.nav-links a {
+    color: #b9c7df;
+    text-decoration: none;
+    font-size: 16px;
+    padding: 28px 0;
+}
+
+.nav-links a:hover,
+.nav-links .active {
+    color: white;
+    border-bottom: 3px solid #368cff;
+}
+
+.search {
+    margin-left: auto;
+    background: #162d50;
+    border-radius: 25px;
+    padding: 12px 20px;
+    width: 280px;
+    color: #91a5c5;
+    border: none;
+    outline: none;
+}
+
+/* =========================
+   HERO
+========================= */
+
+.hero {
+    height: 210px;
+    padding: 55px;
+
+    background:
+        radial-gradient(circle at 80% 50%, #1645a0, transparent 35%),
+        linear-gradient(120deg, #061326, #081b39);
+}
+
+.hero h1 {
+    font-size: 42px;
+    margin-bottom: 12px;
+}
+
+.hero h1 span {
+    color: #269aff;
+}
+
+.hero p {
+    color: #9aacc8;
+    font-size: 18px;
+}
+
+/* =========================
+   LAYOUT
+========================= */
+
+.layout {
+    display: flex;
+}
+
+/* =========================
+   SIDEBAR
+========================= */
+
+.sidebar {
+    width: 240px;
+    min-height: calc(100vh - 290px);
+
+    background: #07172d;
+    border-right: 1px solid #172b49;
+
+    padding: 25px 10px;
+}
+
+.sidebar button {
+    width: 100%;
+    text-align: left;
+
+    background: transparent;
+    color: #91a5c5;
+
+    border: none;
+    padding: 14px 22px;
+
+    border-radius: 8px;
+
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.sidebar button:hover,
+.sidebar button.selected {
+    background: #102e56;
+    color: white;
+}
+
+/* =========================
+   MAIN CONTENT
+========================= */
+
+.content {
+    flex: 1;
+    padding: 25px;
+    overflow: hidden;
+}
+
+/* CATEGORY TABS */
+
+.tabs {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+}
+
+.tab {
+    border: none;
+    background: #102542;
+    color: #aebed6;
+
+    padding: 12px 25px;
+    border-radius: 25px;
+
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.tab:hover {
+    background: #1b3963;
+    color: white;
+}
+
+.tab.active {
+    background: linear-gradient(90deg, #365cff, #703cff);
+    color: white;
+}
+
+/* =========================
+   GAME GRID
+========================= */
+
+.game-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fill, minmax(240px, 1fr));
+
+    gap: 25px;
+}
+
+/* GAME CARD */
+
+.game-card {
+    background: #0d203b;
+    border: 1px solid #1a3559;
+
+    border-radius: 17px;
+
+    overflow: hidden;
+
+    transition:
+        transform 0.2s,
+        box-shadow 0.2s;
+}
+
+.game-card:hover {
+    transform: translateY(-7px);
+
+    box-shadow:
+        0 15px 35px rgba(0, 0, 0, 0.4);
+}
+
+/* IMAGE */
+
+.game-image {
+    width: 100%;
+    height: 150px;
+
+    object-fit: cover;
+
+    background: #132c4d;
+}
+
+/* CARD CONTENT */
+
+.game-info {
+    padding: 18px;
+}
+
+.game-info h2 {
+    font-size: 20px;
+    margin-bottom: 8px;
+}
+
+.game-info p {
+    color: #8ea3c1;
+    font-size: 14px;
+
+    min-height: 40px;
+
+    margin-bottom: 15px;
+}
+
+/* PLAY BUTTON */
+
+.play {
+    width: 100%;
+
+    border: none;
+    border-radius: 25px;
+
+    padding: 11px;
+
+    background:
+        linear-gradient(90deg,
+        #4d38ff,
+        #327fff);
+
+    color: white;
+
+    font-size: 16px;
+    font-weight: bold;
+
+    cursor: pointer;
+}
+
+.play:hover {
+    filter: brightness(1.2);
+}
+
+/* =========================
+   MOBILE
+========================= */
+
+@media (max-width: 800px) {
+
+    .navbar {
+        gap: 15px;
+        padding: 0 15px;
+    }
+
+    .logo {
+        min-width: auto;
+        font-size: 22px;
+    }
+
+    .nav-links {
+        display: none;
+    }
+
+    .search {
+        width: 160px;
+    }
+
+    .hero {
+        padding: 35px 25px;
+    }
+
+    .hero h1 {
+        font-size: 32px;
+    }
+
+    .sidebar {
+        display: none;
+    }
+
+    .content {
+        padding: 18px;
+    }
+}
+</style>
+</head>
+
+
 <body>
-  <base href="https://cdn.jsdelivr.net/gh/web-ports/pvz@latest/">
-  <style>
-    #loading-text {
-  font-weight: bold;
-  background: linear-gradient(
-    270deg,
-    #ff0000,
-    #ff7f00,
-    #ffff00,
-    #00ff00,
-    #0000ff,
-    #4b0082,
-    #8f00ff
-  );
-  background-size: 400% 400%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: rainbow 3s ease infinite;
-}
 
-@keyframes rainbow {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-  </style>
-<div id="loading-text"
-    style="color: white; font-size: 48px; font-family: cursive; text-align: center; margin-top: 20px;"> LOADING...
-  </div>
-<canvas id="canvas" width="800" height="600" style="display:block; outline:0"></canvas>
+<!-- =========================
+     NAVBAR
+========================= -->
 
-<textarea
-  id="pvz-soft-keyboard"
-  style="position:fixed; top:0; left:0; width:1px; height:1px; opacity:0; pointer-events:none; font-size:16px"
-  autocapitalize="off"
-  autocomplete="off"
-  autocorrect="off"
-  enterkeyhint="done"
-  spellcheck="false"
-></textarea>
+<header class="navbar">
+
+    <div class="logo">
+        🎮 Game<span>Hub</span>
+    </div>
+
+    <nav class="nav-links">
+        <a href="#" class="active">⌂ Home</a>
+        <a href="#">🎮 Games</a>
+        <a href="#">🏆 Leaderboard</a>
+        <a href="#">⚙ Settings</a>
+    </nav>
+
+    <input
+        class="search"
+        type="text"
+        placeholder="🔍 Search games..."
+        id="search"
+    >
+
+</header>
+
+
+<!-- =========================
+     HERO
+========================= -->
+
+<section class="hero">
+
+    <h1>
+        PLAY. <span>EXPLORE. ENJOY.</span>
+    </h1>
+
+    <p>
+        Discover and play your favorite games, all in one place.
+    </p>
+
+</section>
+
+
+<!-- =========================
+     PAGE
+========================= -->
+
+<div class="layout">
+
+
+<!-- SIDEBAR -->
+
+<aside class="sidebar">
+
+    <button class="selected">🏠 Home</button>
+
+    <button>🎮 All Games</button>
+
+    <button>⚔ Action</button>
+
+    <button>🏔 Adventure</button>
+
+    <button>🧩 Puzzle</button>
+
+    <button>🏁 Racing</button>
+
+    <button>👾 Arcade</button>
+
+    <button>🏀 Sports</button>
+
+</aside>
+
+
+<!-- MAIN -->
+
+<main class="content">
+
+
+<!-- CATEGORY TABS -->
+
+<div class="tabs">
+
+    <button class="tab active" onclick="filterGames('all', this)">
+        All
+    </button>
+
+    <button class="tab" onclick="filterGames('action', this)">
+        Action
+    </button>
+
+    <button class="tab" onclick="filterGames('adventure', this)">
+        Adventure
+    </button>
+
+    <button class="tab" onclick="filterGames('puzzle', this)">
+        Puzzle
+    </button>
+
+    <button class="tab" onclick="filterGames('racing', this)">
+        Racing
+    </button>
+
+    <button class="tab" onclick="filterGames('arcade', this)">
+        Arcade
+    </button>
+
+    <button class="tab" onclick="filterGames('sports', this)">
+        Sports
+    </button>
+
+</div>
+
+
+<!-- GAME CARDS -->
+
+<div class="game-grid" id="gameGrid">
+
+
+    <!-- SNAKE -->
+
+    <div class="game-card" data-category="arcade">
+
+        <img
+            class="game-image"
+            src="https://placehold.co/600x350/061b32/00ff66?text=SNAKE"
+        >
+
+        <div class="game-info">
+
+            <h2>🐍 Snake</h2>
+
+            <p>
+                Eat the food, grow your snake,
+                and don't hit the wall!
+            </p>
+
+            <button class="play"
+                onclick="playGame('Snake')">
+                Play →
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- TETRIS -->
+
+    <div class="game-card" data-category="puzzle">
+
+        <img
+            class="game-image"
+            src="https://placehold.co/600x350/111d66/00cfff?text=TETRIS"
+        >
+
+        <div class="game-info">
+
+            <h2>🧱 Tetris</h2>
+
+            <p>
+                Fit the blocks together
+                and clear the lines!
+            </p>
+
+            <button class="play"
+                onclick="playGame('Tetris')">
+                Play →
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- PONG -->
+
+    <div class="game-card" data-category="arcade">
+
+        <img
+            class="game-image"
+            src="https://placehold.co/600x350/080d1c/ffffff?text=PONG"
+        >
+
+        <div class="game-info">
+
+            <h2>🏓 Pong</h2>
+
+            <p>
+                Classic arcade action.
+                Simple rules, endless fun.
+            </p>
+
+            <button class="play"
+                onclick="playGame('Pong')">
+                Play →
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- AIM TRAINER -->
+
+    <div class="game-card" data-category="action">
+
+        <img
+            class="game-image"
+            src="https://placehold.co/600x350/26364b/ff4444?text=AIM+TRAINER"
+        >
+
+        <div class="game-info">
+
+            <h2>🎯 Aim Trainer</h2>
+
+            <p>
+                Improve your accuracy
+                and reaction time.
+            </p>
+
+            <button class="play"
+                onclick="playGame('Aim Trainer')">
+                Play →
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- MEMORY -->
+
+    <div class="game-card" data-category="puzzle">
+
+        <img
+            class="game-image"
+            src="https://placehold.co/600x350/1372cf/ffffff?text=MEMORY"
+        >
+
+        <div class="game-info">
+
+            <h2>🧠 Memory</h2>
+
+            <p>
+                Find matching pairs
+                before time runs out.
+            </p>
+
+            <button class="play"
+                onclick="playGame('Memory')">
+                Play →
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- RACING -->
+
+    <div class="game-card" data-category="racing">
+
+        <img
+            class="game-image"
+            src="https://placehold.co/600x350/263d61/ff3333?text=RACING"
+        >
+
+        <div class="game-info">
+
+            <h2>🏎️ Racing</h2>
+
+            <p>
+                Speed, control,
+                and beat your rivals!
+            </p>
+
+            <button class="play"
+                onclick="playGame('Racing')">
+                Play →
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- FLAPPY -->
+
+    <div class="game-card" data-category="arcade">
+
+        <img
+            class="game-image"
+            src="https://placehold.co/600x350/48bff0/ffffff?text=FLAPPY+BIRD"
+        >
+
+        <div class="game-info">
+
+            <h2>🐦 Flappy Bird</h2>
+
+            <p>
+                Fly through the pipes
+                and beat your high score!
+            </p>
+
+            <button class="play"
+                onclick="playGame('Flappy Bird')">
+                Play →
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- SPACE SHOOTER -->
+
+    <div class="game-card" data-category="action">
+
+        <img
+            class="game-image"
+            src="https://placehold.co/600x350/091447/8b5cff?text=SPACE+SHOOTER"
+        >
+
+        <div class="game-info">
+
+            <h2>👾 Space Shooter</h2>
+
+            <p>
+                Defeat aliens and
+                survive as long as you can!
+            </p>
+
+            <button class="play"
+                onclick="playGame('Space Shooter')">
+                Play →
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+</main>
+
+</div>
+
 
 <script>
-  let _res, _rej;
-  window.moduleReadyPromise = new Promise((r, e) => { _res = r; _rej = e; });
 
-  var Module = {
-    canvas: document.getElementById("canvas"),
-    noInitialRun: true,
-    onRuntimeInitialized: _res,
-    onAbort: e => _rej(e),
-    print: console.log,
-    printErr: console.warn,
-  };
-</script>
+/* =========================
+   FILTER GAMES
+========================= */
 
-<script>
-var loadingText = document.querySelector("#loading-text");
-    let totalBytes = 0;
-    let loadedBytes = 0;
+function filterGames(category, button) {
 
-    async function fetchWithProgress(url) {
-      const response = await fetch(url);
-      const reader = response.body.getReader();
-      let chunks = [];
-      let received = 0;
-      while (true) {
-        const {
-          done,
-          value
-        } = await reader.read();
-        if (done) break;
-        received += value.length;
-        loadedBytes += value.length;
-        chunks.push(value);
-        let mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
-        let mbTotal = '43.34';
-        loadingText.textContent = `LOADING... ${mbDone} MB / ${mbTotal} MB`;
-      }
-      let fullBuffer = new Uint8Array(received);
-      let offset = 0;
-      for (let chunk of chunks) {
-        fullBuffer.set(chunk, offset);
-        offset += chunk.length;
-      }
-      return fullBuffer.buffer;
-    }
+    const cards =
+        document.querySelectorAll(".game-card");
 
-    async function mergeFiles(fileParts, cacheKey) {
-      const cache = await caches.open("pvz-cache");
-      const cachedResponse = await cache.match(cacheKey);
-      if (cachedResponse) {
-        const blob = await cachedResponse.blob();
-        return URL.createObjectURL(blob);
-      }
-      const buffers = await Promise.all(
-        fileParts.map(part => fetchWithProgress(part))
-      );
-      const mergedBlob = new Blob(buffers);
-      const response = new Response(mergedBlob);
-      await cache.put(cacheKey, response);
-      return URL.createObjectURL(mergedBlob);
-    }
+    const tabs =
+        document.querySelectorAll(".tab");
 
-    function getParts(file, start, end) {
-      let parts = [];
-      for (let i = start; i <= end; i++) {
-        parts.push(file + ".part" + i);
-      }
-      return parts;
-    }
-    (async () => {
-      const [pakurl] = await Promise.all([
-        mergeFiles(getParts("main.pak", 1, 3), "main.pak"),
-      ]);
-      let ns = document.createElement("script");
-      ns.src="pvz.js";
-      document.body.appendChild(ns);
-    await moduleReadyPromise;
 
-    const files = [
-      [pakurl, "main.pak"],
-      ["properties/Layout.xml", "properties/Layout.xml"],
-      ["properties/partner.xml.sig", "properties/partner.xml.sig"],
-      ["properties/default.xml", "properties/default.xml"],
-      ["properties/partner.xml", "properties/partner.xml"],
-      ["properties/partner_logo.jpg", "properties/partner_logo.jpg"],
-    ];
+    tabs.forEach(tab => {
+        tab.classList.remove("active");
+    });
 
-    for (const [src, dest] of files) {
-      const data = new Uint8Array(await (await fetch(src)).arrayBuffer());
-      const parts = dest.split("/");
-      let dir = "/";
-      for (let i = 0; i < parts.length - 1; i++) {
-        dir += (dir === "/" ? "" : "/") + parts[i];
-        try { Module.FS.mkdir(dir); } catch {}
-      }
-      Module.FS.writeFile("/" + dest, data);
-    }
+    button.classList.add("active");
 
-    try { Module.FS.mkdir("/saves"); } catch {}
-    try { Module.FS.mount(Module.FS.filesystems.IDBFS, {}, "/saves"); } catch {}
-    await new Promise(r => Module.FS.syncfs(true, r));
 
-    const c = document.getElementById("canvas");
-    const resize = () => {
-      const s = Math.min(innerWidth / 800, innerHeight / 600);
-      c.style.width  = s * 800 + "px";
-      c.style.height = s * 600 + "px";
-    };
-    resize();
-    addEventListener("resize", resize);
-    addEventListener("fullscreenchange", resize);
+    cards.forEach(card => {
 
-    document.body.style = "margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden";
+        if (
+            category === "all" ||
+            card.dataset.category === category
+        ) {
 
-    const sync = () => Module.FS.syncfs(false, () => {});
-    setInterval(sync, 5000);
-    addEventListener("visibilitychange", () => document.hidden && sync());
-    addEventListener("pagehide", sync);
+            card.style.display = "block";
 
-    Module.callMain([]);
-    loadingText.remove();
-  })();
+        } else {
+
+            card.style.display = "none";
+
+        }
+
+    });
+}
+
+
+/* =========================
+   PLAY BUTTON
+========================= */
+
+function playGame(game) {
+
+    alert(
+        "Opening " + game + "..."
+    );
+
+    // Later you can replace this with:
+    //
+    // window.location.href =
+    // "games/" + game.toLowerCase() + ".html";
+
+}
+
+
+/* =========================
+   SEARCH
+========================= */
+
+document
+.getElementById("search")
+.addEventListener("input", function() {
+
+    const search =
+        this.value.toLowerCase();
+
+    const cards =
+        document.querySelectorAll(".game-card");
+
+
+    cards.forEach(card => {
+
+        const name =
+            card.querySelector("h2")
+            .textContent
+            .toLowerCase();
+
+
+        if (name.includes(search)) {
+
+            card.style.display = "block";
+
+        } else {
+
+            card.style.display = "none";
+
+        }
+
+    });
+
+});
+
 </script>
 
 </body>
