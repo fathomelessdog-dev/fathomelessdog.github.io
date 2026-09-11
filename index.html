@@ -1,125 +1,445 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Fathomeless Dog Games</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <style>
-        img {
-    display: block;
-    margin: auto;
+<title>Fathomelessdog games</title>
+
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
 }
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #111;
-            color: white;
-        }
 
-        /* Header */
-        header {
-            background: #222;
-            padding: 20px;
-            text-align: center;
-        }
+body {
+    font-family: Arial, sans-serif;
+    background: #061326;
+    color: white;
+}
 
-        header h1 {
-            margin: 0;
-        }
+/* =========================
+   TOP NAVIGATION
+========================= */
 
-        /* Navigation */
-        nav {
-            background: #333;
-            padding: 10px;
-            text-align: center;
-        }
+.navbar {
+    height: 80px;
+    background: #0a1930;
+    border-bottom: 1px solid #172b49;
 
-        nav a {
-            color: white;
-            text-decoration: none;
-            margin: 0 15px;
-        }
+    display: flex;
+    align-items: center;
+    padding: 0 35px;
+    gap: 50px;
+}
 
-        nav a:hover {
-            color: #4da6ff;
-        }
+.logo {
+    font-size: 30px;
+    font-weight: bold;
+    min-width: 260px;
+}
 
-        /* Main */
-        main {
-            padding: 30px;
-            text-align: center;
-        }
+.logo span {
+    color: #2196ff;
+}
 
-        main h2 {
-            margin-bottom: 30px;
-        }
+.nav-links {
+    display: flex;
+    gap: 35px;
+}
 
-        /* Games */
-        .games {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
+.nav-links a {
+    color: #b9c7df;
+    text-decoration: none;
+    font-size: 16px;
+    padding: 28px 0;
+}
 
-        /* Game Card */
-        .game-card {
-            background: #222;
-            width: 350px;
-            padding: 15px;
-            margin: 15px;
-            border-radius: 10px;
-        }
+.nav-links a:hover,
+.nav-links .active {
+    color: white;
+    border-bottom: 3px solid #368cff;
+}
 
-       .game-image {
-        width: 100%;
-        height: 130px;
-        object-fit: cover;
-        display: block;
-        border-radius: 7px;
+.search {
+    margin-left: auto;
+    background: #162d50;
+    border-radius: 25px;
+    padding: 12px 20px;
+    width: 280px;
+    color: #91a5c5;
+    border: none;
+    outline: none;
+}
+
+/* =========================
+   HERO
+========================= */
+
+.hero {
+    height: 210px;
+    padding: 55px;
+
+    background:
+        radial-gradient(circle at 80% 50%, #1645a0, transparent 35%),
+        linear-gradient(120deg, #061326, #081b39);
+}
+
+.hero h1 {
+    font-size: 42px;
+    margin-bottom: 12px;
+}
+
+.hero h1 span {
+    color: #269aff;
+}
+
+.hero p {
+    color: #9aacc8;
+    font-size: 18px;
+}
+
+/* =========================
+   LAYOUT
+========================= */
+
+.layout {
+    display: flex;
+}
+
+/* =========================
+   SIDEBAR
+========================= */
+
+.sidebar {
+    width: 240px;
+    min-height: calc(100vh - 290px);
+
+    background: #07172d;
+    border-right: 1px solid #172b49;
+
+    padding: 25px 10px;
+}
+
+.sidebar button {
+    width: 100%;
+    text-align: left;
+
+    background: transparent;
+    color: #91a5c5;
+
+    border: none;
+    padding: 14px 22px;
+
+    border-radius: 8px;
+
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.sidebar button:hover,
+.sidebar button.selected {
+    background: #102e56;
+    color: white;
+}
+
+/* =========================
+   MAIN CONTENT
+========================= */
+
+.content {
+    flex: 1;
+    padding: 25px;
+    overflow: hidden;
+}
+
+/* CATEGORY TABS */
+
+.tabs {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+}
+
+.tab {
+    border: none;
+    background: #102542;
+    color: #aebed6;
+
+    padding: 12px 25px;
+    border-radius: 25px;
+
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.tab:hover {
+    background: #1b3963;
+    color: white;
+}
+
+.tab.active {
+    background: linear-gradient(90deg, #365cff, #703cff);
+    color: white;
+}
+
+/* =========================
+   GAME GRID
+========================= */
+
+.game-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fill, minmax(240px, 1fr));
+
+    gap: 25px;
+}
+
+/* GAME CARD */
+
+.game-card {
+    background: #0d203b;
+    border: 1px solid #1a3559;
+
+    border-radius: 17px;
+
+    overflow: hidden;
+
+    transition:
+        transform 0.2s,
+        box-shadow 0.2s;
+}
+
+.game-card:hover {
+    transform: translateY(-7px);
+
+    box-shadow:
+        0 15px 35px rgba(0, 0, 0, 0.4);
+}
+
+/* IMAGE */
+
+.game-image {
+    width: 100%;
+    height: 150px;
+
+    object-fit: cover;
+
+    background: #132c4d;
+}
+
+/* CARD CONTENT */
+
+.game-info {
+    padding: 18px;
+}
+
+.game-info h2 {
+    font-size: 20px;
+    margin-bottom: 8px;
+}
+
+.game-info p {
+    color: #8ea3c1;
+    font-size: 14px;
+
+    min-height: 40px;
+
+    margin-bottom: 15px;
+}
+
+/* PLAY BUTTON */
+
+.play {
+    width: 100%;
+
+    border: none;
+    border-radius: 25px;
+
+    padding: 11px;
+
+    background:
+        linear-gradient(90deg,
+        #4d38ff,
+        #327fff);
+
+    color: white;
+
+    font-size: 16px;
+    font-weight: bold;
+
+    cursor: pointer;
+}
+
+.play:hover {
+    filter: brightness(1.2);
+}
+
+/* =========================
+   MOBILE
+========================= */
+
+@media (max-width: 800px) {
+
+    .navbar {
+        gap: 15px;
+        padding: 0 15px;
     }
 
+    .logo {
+        min-width: auto;
+        font-size: 22px;
+    }
 
-        }
+    .nav-links {
+        display: none;
+    }
 
-        /* Only the game name is a link */
-        .game-card a {
-            color: white;
-            text-decoration: none;
-        }
+    .search {
+        width: 160px;
+    }
 
-        .game-card a:hover {
-            color: #4da6ff;
-        }
+    .hero {
+        padding: 35px 25px;
+    }
 
-        /* Footer */
-        footer {
-            background: #222;
-            text-align: center;
-            padding: 20px;
-            margin-top: 40px;
-            color: #888;
-        }
-    </style>
+    .hero h1 {
+        font-size: 32px;
+    }
+
+    .sidebar {
+        display: none;
+    }
+
+    .content {
+        padding: 18px;
+    }
+}
+</style>
 </head>
+
 
 <body>
 
-    <!-- HEADER -->
-    <img src="images/bulldog.jpg" width="500">
-    <header>
-        <h1>🐕 Fathomeless Dog Games</h1>
-    </header>
+<!-- =========================
+     NAVBAR
+========================= -->
 
-    <!-- NAVIGATION -->
-    <nav>
-        <a href="index.html">Home</a>
-        <a href="https://fathomelessdogforums.forumotion.com/">forums</a>
-        <a href="about.html">About</a>
+<header class="navbar">
+
+    <div class="logo">
+        🎮 Game<span>Hub</span>
+    </div>
+
+    <nav class="nav-links">
+        <a href="#" class="active">⌂ Home</a>
+        <a href="#">🎮 Games</a>
+        <a href="https://fathomelessdogforums.forumotion.com/"> forums</a>
+        <a href="#">⚙ Settings</a>
     </nav>
 
-    <!-- MAIN CONTENT -->
-    <main>
+    <input
+        class="search"
+        type="text"
+        placeholder="🔍 Search games..."
+        id="search"
+    >
 
-        <h2>Games</h2>
+</header>
+
+
+<!-- =========================
+     HERO
+========================= -->
+
+<section class="hero">
+
+    <h1>
+        PLAY. <span>EXPLORE. ENJOY.</span>
+    </h1>
+
+    <p>
+        Discover and play your favorite games, all in one place.
+    </p>
+
+</section>
+
+
+<!-- =========================
+     PAGE
+========================= -->
+
+<div class="layout">
+
+
+<!-- SIDEBAR -->
+
+<aside class="sidebar">
+
+    <button class="selected">🏠 Home</button>
+
+    <button>🎮 All Games</button>
+
+    <button>⚔ Action</button>
+
+    <button>🏔 Adventure</button>
+
+    <button>🧩 Puzzle</button>
+
+    <button>🏁 Racing</button>
+
+    <button>👾 Arcade</button>
+
+    <button>🏀 Sports</button>
+
+</aside>
+
+
+<!-- MAIN -->
+
+<main class="content">
+
+
+<!-- CATEGORY TABS -->
+
+<div class="tabs">
+
+    <button class="tab active" onclick="filterGames('all', this)">
+        All
+    </button>
+
+    <button class="tab" onclick="filterGames('action', this)">
+        Action
+    </button>
+
+    <button class="tab" onclick="filterGames('adventure', this)">
+        Adventure
+    </button>
+
+    <button class="tab" onclick="filterGames('puzzle', this)">
+        Puzzle
+    </button>
+
+    <button class="tab" onclick="filterGames('racing', this)">
+        Racing
+    </button>
+
+    <button class="tab" onclick="filterGames('arcade', this)">
+        Arcade
+    </button>
+
+    <button class="tab" onclick="filterGames('sports', this)">
+        Sports
+    </button>
+
+</div>
+
+
+<!-- GAME CARDS -->
+
+<div class="game-grid" id="gameGrid">
 
         <div class="games">
 
@@ -241,13 +561,105 @@
         
     </div>
 
-    </main>
+        
 
-    <!-- FOOTER -->
-    <footer>
-        Fathomeless Dog Games © 2026
-    </footer>
+<script>
+
+/* =========================
+   FILTER GAMES
+========================= */
+
+function filterGames(category, button) {
+
+    const cards =
+        document.querySelectorAll(".game-card");
+
+    const tabs =
+        document.querySelectorAll(".tab");
+
+
+    tabs.forEach(tab => {
+        tab.classList.remove("active");
+    });
+
+    button.classList.add("active");
+
+
+    cards.forEach(card => {
+
+        if (
+            category === "all" ||
+            card.dataset.category === category
+        ) {
+
+            card.style.display = "block";
+
+        } else {
+
+            card.style.display = "none";
+
+        }
+
+    });
+}
+
+
+/* =========================
+   PLAY BUTTON
+========================= */
+
+function playGame(game) {
+
+    alert(
+        "Opening " + game + "..."
+    );
+
+    // Later you can replace this with:
+    //
+    // window.location.href =
+    // "games/" + game.toLowerCase() + ".html";
+
+}
+
+
+/* =========================
+   SEARCH
+========================= */
+
+document
+.getElementById("search")
+.addEventListener("input", function() {
+
+    const search =
+        this.value.toLowerCase();
+
+    const cards =
+        document.querySelectorAll(".game-card");
+
+
+    cards.forEach(card => {
+
+        const name =
+            card.querySelector("h2")
+            .textContent
+            .toLowerCase();
+
+
+        if (name.includes(search)) {
+
+            card.style.display = "block";
+
+        } else {
+
+            card.style.display = "none";
+
+        }
+
+    });
+
+});
+
+</script>
 
 </body>
 </html>
-```
