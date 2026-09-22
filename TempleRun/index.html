@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temple Run - Web Edition</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <div class="ui-overlay">
+            <div class="score-display">
+                <div class="score-item">
+                    <span class="label">Score:</span>
+                    <span id="score">0</span>
+                </div>
+                <div class="score-item">
+                    <span class="label">Coins:</span>
+                    <span id="coins">0</span>
+                </div>
+                <div class="score-item">
+                    <span class="label">Distance:</span>
+                    <span id="distance">0</span>m
+                </div>
+            </div>
+            <div class="controls-hint">
+                <p>Use ← → Arrow Keys or A/D to move</p>
+                <p>Press SPACE or ↑ to jump</p>
+            </div>
+        </div>
+        
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="startScreen" class="screen">
+            <h1>🏛️ TEMPLE RUN</h1>
+            <p>Escape the temple! Avoid obstacles and collect coins!</p>
+            <button id="startBtn" class="btn">START GAME</button>
+        </div>
+        
+        <div id="gameOverScreen" class="screen hidden">
+            <h1>GAME OVER</h1>
+            <div class="final-stats">
+                <p>Final Score: <span id="finalScore">0</span></p>
+                <p>Coins Collected: <span id="finalCoins">0</span></p>
+                <p>Distance: <span id="finalDistance">0</span>m</p>
+            </div>
+            <button id="restartBtn" class="btn">PLAY AGAIN</button>
+        </div>
+    </div>
+    
+    <script src="game.js"></script>
+</body>
+</html>
