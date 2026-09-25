@@ -232,24 +232,49 @@ body {
 
 /* CARD CONTENT */
 
-.game-info {
-    padding: 18px;
+.game-container {
+    display: grid;
+
+    /* 2 cards per row */
+    grid-template-columns: repeat(2, 1fr);
+
+    gap: 20px;
+
+    width: 90%;
+    max-width: 1000px;
+
+    margin: 30px auto;
 }
 
-.game-info h2 {
-    font-size: 20px;
-    margin-bottom: 8px;
+.game-card {
+    background: #142d50;
+
+    border-radius: 20px;
+
+    overflow: hidden;
+
+    min-width: 0;
 }
 
-.game-info p {
-    color: #8ea3c1;
-    font-size: 14px;
+.game-card img {
+    width: 100%;
+    height: 220px;
 
-    min-height: 40px;
+    display: block;
 
-    margin-bottom: 15px;
+    object-fit: cover;
 }
 
+.game-card a {
+    display: block;
+
+    padding: 10px;
+
+    font-size: 24px;
+    font-weight: bold;
+
+    color: blue;
+}
 /* PLAY BUTTON */
 
 .play {
