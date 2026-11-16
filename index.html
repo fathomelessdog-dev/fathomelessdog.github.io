@@ -1,836 +1,352 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Fathomelessdog games</title>
+<title>Fathomeless Dog Games</title>
 
 <style>
 * {
+    box-sizing: border-box;
     margin: 0;
     padding: 0;
-    box-sizing: border-box;
 }
 
 body {
-    font-family: Arial, sans-serif;
-    background: #061326;
+    background: #11131a;
     color: white;
+    font-family: Arial, sans-serif;
 }
 
-/* =========================
-   TOP NAVIGATION
-========================= */
+/* NAVIGATION */
 
 .navbar {
-    height: 80px;
-    background: #0a1930;
-    border-bottom: 1px solid #172b49;
-
+    background: #191c27;
+    padding: 20px 6%;
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    padding: 0 35px;
-    gap: 50px;
+    border-bottom: 1px solid #303444;
 }
 
 .logo {
-    font-size: 30px;
+    font-size: 23px;
     font-weight: bold;
-    min-width: 260px;
+    color: #65a7ff;
 }
 
-.logo span {
-    color: #2196ff;
-}
-
-.nav-links {
-    display: flex;
-    gap: 35px;
-}
-
-.nav-links a {
-    color: #b9c7df;
+.navbar a {
+    color: #ccc;
     text-decoration: none;
-    font-size: 16px;
-    padding: 28px 0;
+    margin-left: 20px;
 }
 
-.nav-links a:hover,
-.nav-links .active {
-    color: white;
-    border-bottom: 3px solid #368cff;
+/* MAIN BANNER */
+
+.banner {
+    margin: 30px auto;
+    width: 88%;
+    padding: 65px 30px;
+    border-radius: 14px;
+    background: linear-gradient(120deg, #234d85, #542c87);
+    text-align: center;
 }
 
-.search {
-    margin-left: auto;
-    background: #162d50;
-    border-radius: 25px;
-    padding: 12px 20px;
-    width: 280px;
-    color: #91a5c5;
-    border: none;
-    outline: none;
-}
-
-/* =========================
-   HERO
-========================= */
-
-.hero {
-    height: 210px;
-    padding: 55px;
-
-    background:
-        radial-gradient(circle at 80% 50%, #1645a0, transparent 35%),
-        linear-gradient(120deg, #061326, #081b39);
-}
-
-.hero h1 {
-    font-size: 42px;
+.banner h1 {
+    font-size: 38px;
     margin-bottom: 12px;
 }
 
-.hero h1 span {
-    color: #269aff;
+.banner p {
+    color: #ddd;
 }
 
-.hero p {
-    color: #9aacc8;
-    font-size: 18px;
+/* GAME SECTION */
+
+.container {
+    width: 88%;
+    margin: 35px auto;
 }
 
-/* =========================
-   LAYOUT
-========================= */
-
-.layout {
-    display: flex;
+.section-title {
+    font-size: 25px;
+    margin-bottom: 20px;
 }
 
-/* =========================
-   SIDEBAR
-========================= */
+/* SEARCH */
 
-.sidebar {
-    width: 240px;
-    min-height: calc(100vh - 290px);
-
-    background: #07172d;
-    border-right: 1px solid #172b49;
-
-    padding: 25px 10px;
-}
-
-.sidebar button {
+.search-box {
     width: 100%;
-    text-align: left;
-
-    background: transparent;
-    color: #91a5c5;
-
-    border: none;
-    padding: 14px 22px;
-
+    padding: 14px;
+    background: #202432;
+    border: 1px solid #34394a;
     border-radius: 8px;
-
-    font-size: 16px;
-    cursor: pointer;
-}
-
-.sidebar button:hover,
-.sidebar button.selected {
-    background: #102e56;
     color: white;
-}
-
-/* =========================
-   MAIN CONTENT
-========================= */
-
-.content {
-    flex: 1;
-    padding: 25px;
-    overflow: hidden;
+    font-size: 15px;
+    margin-bottom: 20px;
+    outline: none;
 }
 
 /* CATEGORY TABS */
 
-.tabs {
+.categories {
     display: flex;
-    gap: 15px;
-    margin-bottom: 28px;
     flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 25px;
 }
 
-.tab {
+.category {
+    background: #252a39;
+    color: #ccc;
     border: none;
-    background: #102542;
-    color: #aebed6;
-
-    padding: 12px 25px;
-    border-radius: 25px;
-
-    font-size: 15px;
+    padding: 11px 20px;
+    border-radius: 7px;
     cursor: pointer;
+    font-size: 14px;
 }
 
-.tab:hover {
-    background: #1b3963;
+.category:hover,
+.category.active {
+    background: #347fe0;
     color: white;
 }
 
-.tab.active {
-    background: linear-gradient(90deg, #365cff, #703cff);
-    color: white;
-}
-
-/* =========================
-   GAME GRID
-========================= */
+/* GAME GRID */
 
 .game-grid {
     display: grid;
-    grid-template-columns:
-        repeat(auto-fill, minmax(240px, 1fr));
-
-    gap: 25px;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 20px;
 }
 
 /* GAME CARD */
 
 .game-card {
-    background: #0d203b;
-    border: 1px solid #1a3559;
-
-    border-radius: 17px;
-
+    background: #1c202c;
+    border: 1px solid #303647;
+    border-radius: 10px;
     overflow: hidden;
-
-    transition:
-        transform 0.2s,
-        box-shadow 0.2s;
+    transition: 0.2s;
+    min-width: 0;
 }
 
 .game-card:hover {
-    transform: translateY(-7px);
-
-    box-shadow:
-        0 15px 35px rgba(0, 0, 0, 0.4);
-}
-
-/* IMAGE */
-
-.game-image {
-    width: 100%;
-    height: 150px;
-
-    object-fit: cover;
-
-    background: #132c4d;
-}
-
-/* CARD CONTENT */
-
-.game-container {
-    display: grid;
-
-    /* 2 cards per row */
-    grid-template-columns: repeat(2, 1fr);
-
-    gap: 20px;
-
-    width: 90%;
-    max-width: 1000px;
-
-    margin: 30px auto;
-}
-
-.game-card {
-    background: #142d50;
-
-    border-radius: 20px;
-
-    overflow: hidden;
-
-    min-width: 0;
+    transform: translateY(-5px);
+    border-color: #559bff;
 }
 
 .game-card img {
     width: 100%;
-    height: 220px;
-
-    display: block;
-
+    height: 135px;
     object-fit: cover;
-}
-
-.game-card a {
     display: block;
+}
 
+.game-info {
+    padding: 14px;
+}
+
+.game-info h3 {
+    font-size: 17px;
+    margin-bottom: 8px;
+}
+
+.game-info p {
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 13px;
+}
+
+.play-link {
+    display: block;
+    text-align: center;
     padding: 10px;
-
-    font-size: 24px;
-    font-weight: bold;
-
-    color: blue;
-}
-/* PLAY BUTTON */
-
-.play {
-    width: 100%;
-
-    border: none;
-    border-radius: 25px;
-
-    padding: 11px;
-
-    background:
-        linear-gradient(90deg,
-        #4d38ff,
-        #327fff);
-
+    background: #347fe0;
+    border-radius: 6px;
+    text-decoration: none;
     color: white;
-
-    font-size: 16px;
-    font-weight: bold;
-
-    cursor: pointer;
+    font-size: 14px;
 }
 
-.play:hover {
-    filter: brightness(1.2);
+.play-link:hover {
+    background: #559bff;
 }
 
-/* =========================
-   MOBILE
-========================= */
+/* FOOTER */
 
-@media (max-width: 800px) {
+footer {
+    text-align: center;
+    padding: 30px;
+    margin-top: 50px;
+    background: #191c27;
+    color: #888;
+    font-size: 13px;
+}
 
-    .navbar {
-        gap: 15px;
-        padding: 0 15px;
+@media (max-width: 600px) {
+    .banner h1 {
+        font-size: 28px;
     }
 
-    .logo {
-        min-width: auto;
-        font-size: 22px;
+    .game-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
     }
 
-    .nav-links {
-        display: none;
-    }
-
-    .search {
-        width: 160px;
-    }
-
-    .hero {
-        padding: 35px 25px;
-    }
-
-    .hero h1 {
-        font-size: 32px;
-    }
-
-    .sidebar {
-        display: none;
-    }
-
-    .content {
-        padding: 18px;
+    .container {
+        width: 92%;
     }
 }
 </style>
 </head>
 
-
 <body>
 
-<!-- =========================
-     NAVBAR
-========================= -->
+<!-- NAVIGATION -->
 
-<header class="navbar">
+<nav class="navbar">
+    <div class="logo">🐶 Fathomeless Dog Games</div>
 
-    <div class="logo">
-        🎮 Fathomelessdog<span>Hub</span>
+    <div>
+        <a href="index.html">Home</a>
+        <a href="#games">Games</a>
     </div>
+</nav>
 
-    <nav class="nav-links">
-        <a href="#" class="active">⌂ Home</a>
-        <a href="#">🎮 Games</a>
-        <a href="https://fathomelessdogforums.forumotion.com/"> forums</a>
-        <a href="#">⚙ Settings</a>
-    </nav>
+<!-- BANNER -->
 
-    <input
-        class="search"
-        type="text"
-        placeholder="🔍 Search games..."
-        id="search"
-    >
-
+<header class="banner">
+    <h1>Welcome to the Arcade!</h1>
+    <p>Find a game, click play, and have some fun.</p>
 </header>
 
+<!-- GAME SELECTION -->
 
-<!-- =========================
-     HERO
-========================= -->
+<main class="container" id="games">
 
-<section class="hero">
+    <h2 class="section-title">Browse Games</h2>
 
-    <h1>
-        PLAY. <span>EXPLORE. ENJOY.</span>
-    </h1>
+    <input
+        type="text"
+        class="search-box"
+        id="search"
+        placeholder="Search for a game..."
+    >
 
-    <p>
-        Discover and play your favorite games, all in one place.
+    <!-- CATEGORY BUTTONS -->
+
+    <div class="categories">
+        <button class="category active" data-category="all">All Games</button>
+        <button class="category" data-category="action">Action</button>
+        <button class="category" data-category="adventure">Adventure</button>
+        <button class="category" data-category="puzzle">Puzzle</button>
+        <button class="category" data-category="arcade">Arcade</button>
+    </div>
+
+    <!-- GAME CARDS -->
+
+    <div class="game-grid" id="gameGrid">
+
+        <div class="game-card" data-category="action">
+            <img src="images/game1.jpg" alt="Game 1">
+            <div class="game-info">
+                <h3>Game One</h3>
+                <p>Action game</p>
+                <a href="games/game1/index.html" class="play-link">Play Game</a>
+            </div>
+        </div>
+
+        <div class="game-card" data-category="adventure">
+            <img src="images/game2.jpg" alt="Game 2">
+            <div class="game-info">
+                <h3>Game Two</h3>
+                <p>Adventure game</p>
+                <a href="games/game2/index.html" class="play-link">Play Game</a>
+            </div>
+        </div>
+
+        <div class="game-card" data-category="puzzle">
+            <img src="images/game3.jpg" alt="Game 3">
+            <div class="game-info">
+                <h3>Game Three</h3>
+                <p>Puzzle game</p>
+                <a href="games/game3/index.html" class="play-link">Play Game</a>
+            </div>
+        </div>
+
+        <div class="game-card" data-category="arcade">
+            <img src="images/game4.jpg" alt="Game 4">
+            <div class="game-info">
+                <h3>Game Four</h3>
+                <p>Arcade game</p>
+                <a href="games/game4/index.html" class="play-link">Play Game</a>
+            </div>
+        </div>
+
+    </div>
+
+    <p id="noResults" style="display:none; color:#999; margin-top:25px;">
+        No games found.
     </p>
 
-</section>
+</main>
 
+<footer>
+    Fathomeless Dog Games © 2026
+</footer>
 
-<!-- =========================
-     PAGE
-========================= -->
-
-<div class="layout">
-
-
-<!-- SIDEBAR -->
-
-<aside class="sidebar">
-
-    <button class="selected">🏠 Home</button>
-
-    <button>🎮 All Games</button>
-
-    <button>⚔ Action</button>
-
-    <button>🏔 Adventure</button>
-
-    <button>🧩 Puzzle</button>
-
-    <button>🏁 Racing</button>
-
-    <button>👾 Arcade</button>
-
-    <button>🏀 Sports</button>
-
-</aside>
-
-
-<!-- MAIN -->
-
-<main class="content">
-
-
-<!-- CATEGORY TABS -->
-
-<div class="tabs">
-
-    <button class="tab active" onclick="filterGames('all', this)">
-        All
-    </button>
-
-    <button class="tab" onclick="filterGames('action', this)">
-        Action
-    </button>
-
-    <button class="tab" onclick="filterGames('adventure', this)">
-        Adventure
-    </button>
-
-    <button class="tab" onclick="filterGames('puzzle', this)">
-        Puzzle
-    </button>
-
-    <button class="tab" onclick="filterGames('racing', this)">
-        Racing
-    </button>
-
-    <button class="tab" onclick="filterGames('arcade', this)">
-        Arcade
-    </button>
-
-    <button class="tab" onclick="filterGames('sports', this)">
-        Sports
-    </button>
-
-</div>
-
-
-<!-- GAME CARDS -->
-
-<div class="game-grid" id="gameGrid">
-
-        <div class="games">
-
-            <!-- GAME 1 -->
-            <div class="game-card">
-                <div class="game-image">
-                <img src="images/baldi.jpg">
-                </div>
-
-                <h3>
-                    <a href="baldi/index.html">baldi</a>
-                </h3>
-            </div>
-
-
-            <!-- GAME 2 -->
-            <div class="game-card">
-                <div class="game-image">
-                   <img src="images/Screenshot 2026-04-15 095149.png">
-                </div>
-
-                <h3>
-                    <a href="cookieclicker/index.html">cookie clicker</a>
-                </h3>
-            </div>
-
-
-            <!-- GAME 3 -->
-            <div class="game-card">
-                <div class="game-image">
-                    <img src ="images/cup.jpg">
-                </div>
-
-                <h3>
-                    <a href="cuphead/index.html">cuphead</a>
-                </h3>
-            </div>
-
-
-            
-            <div class="game-card">
-                <div class="game-image">
-                    <img src="images/crep.jpg">
-                </div>
-
-                <h3>
-                    <a href="minecraft/index.html">minecraft</a>
-                </h3>
-        </div>
-             
-            <div class="game-card">
-                <div class="game-image">
-                    <img src="images/tgrandma.jpg">
-                </div>
-
-                <h3>
-                    <a href="granny/index.html">granny</a>
-                </h3>
-            </div>
-            
-         <div class="game-card">
-                <div class="game-image">
-                    <img src="images/s.jpg">
-                </div>
-
-                <h3>
-                    <a href="baldiclassic/index.html">baldi og</a>
-                </h3>
-            </div>
-            
-            <div class="game-card">
-                <div class="game-image">
-                    <img src="images/luiig.webp">
-                </div>
-
-                <h3>
-                    <a href="mario64/index.html">mario 64</a>
-                </h3>
-            </div>
-          
-            
-
-             <div class="game-card">
-                <div class="game-image">
-                    <img src="images/scary.jpg">
-                </div>
-
-                <h3>
-                    <a href="granny2/index.html">granny</a>
-                </h3>
-            </div>
-
-        </div>
-    <div class="game-card">
-                <div class="game-image">
-                    <img src="images/soildsquire.png">
-                </div>
-
-                <h3>
-                    <a href="soildsquire_cottontune/index.html">soild squire cottontune</a>
-                </h3>
-    <div class="game-card">
-                <div class="game-image">
-                    <img src="images/pac.webp">
-                </div>
-
-                <h3>
-                    <a href="pvz/index.html">pvz</a>
-                </h3>
-            </div>
-         <div class="game-card">
-                <div class="game-image">
-                    <img src="images/knight.webp">
-                </div>
-
-                <h3>
-                    <a href="Hollow_Knight/index.html">Hungry knight</a>
-                </h3>
-            </div>
-            
-         <div class="game-card">
-                <div class="game-image">
-                    <img src="images/getting over it.jpg">
-                </div>
-
-                <h3>
-                    <a href="getting/index.html">getting over it</a>
-                </h3>
-            </div>
-        
-         <div class="game-card">
-                <div class="game-image">
-                    <img src="images/hill climbing.jpg">
-                </div>
-
-                <h3>
-                    <a href="hill/index.html">getting over it</a>
-                </h3>
-            </div>
-        
-          <div class="game-card">
-                <div class="game-image">
-                    <img src="images/angyr bir.webp">
-                </div>
-
-                <h3>
-                    <a href="angrybirds2/index.html">angry birds 2</a>
-                </h3>
-            </div>
-                  <div class="game-card">
-                <div class="game-image">
-                    <img src="images/bird.jpg">
-                </div>
-
-                <h3>
-                    <a href="angrybirdsepic/index.html">angry birds epik</a>
-                </h3>
-            </div>
-     
-            </div>
-      <div class="game-card">
-                <div class="game-image">
-                    <img src="images/we.jpg">
-                </div>
-
-                <h3>
-                    <a href="Baldiuniverse/index.html">Baldi universe</a>
-                </h3>
-            </div>
-      <div class="game-card">
-                <div class="game-image">
-                    <img src="images/geodash.jpg">
-                </div>
-
-                <h3>
-                    <a href="Geodash/index.html">Geometry dash</a>
-                </h3>
-            </div>
-       <div class="game-card">
-                <div class="game-image">
-                    <img src="images/svary.jpg">
-                </div>
-
-                <h3>
-                    <a href="PlagueInc/index.html">Plagueinc</a>
-                </h3>
-            </div>
-           <div class="game-card">
-                <div class="game-image">
-                    <img src="images/harambre.jpg">
-                </div>
-
-                <h3>
-                    <a href="flying_gorilla/index.html">flying gorilla</a>
-                </h3>
-            </div>
-
-           <div class="game-card">
-                <div class="game-image">
-                    <img src="images/city.jpg">
-                </div>
-
-                <h3>
-                    <a href="simcity/index.html">city sim</a>
-                </h3>
-            </div>
-
-        
-           <div class="game-card">
-                <div class="game-image">
-                    <img src="images/fnaf1.jpg">
-                </div>
-
-                <h3>
-                    <a href="fnaf/index.html">fnaf</a>
-                </h3>
-            </div>
-            
-                <div class="game-card">
-                <div class="game-image">
-                    <img src="images/fnaf2.jpg">
-                </div>
-
-                <h3>
-                    <a href="fnaf2/index.html">fnaf 2</a>
-                </h3>
-            </div>
-        <div class="game-card">
-                <div class="game-image">
-                    <img src="images/fnaf 3.jpg">
-                </div>
-
-                <h3>
-                    <a href="fnaf3/index.html">fnaf 3</a>
-                </h3>
-            </div>    
-                 <div class="game-card">
-                <div class="game-image">
-                    <img src="images/fnaf.jpg">
-                </div>
-
-                <h3>
-                    <a href="fnaf4/index.html">fnaf 4</a>
-                </h3>
-            </div>   
-                <div class="game-card">
-                <div class="game-image">
-                    <img src="images/ps.jpg">
-                </div>
-
-                <h3>
-                    <a href="fnafps/index.html">fnaf pizza simulator</a>
-                </h3>
-            </div>   
-                 <div class="game-card">
-                <div class="game-image">
-                    <img src="images/ucn.webp">
-                </div>
-
-                <h3>
-                    <a href="ucn/index.html">ucn</a>
-                </h3>
-            </div>   
-
-
-
-</div>
-
-        
+<!-- SEARCH AND CATEGORY SYSTEM -->
 
 <script>
+const search = document.getElementById("search");
+const cards = document.querySelectorAll(".game-card");
+const buttons = document.querySelectorAll(".category");
+const noResults = document.getElementById("noResults");
 
-/* =========================
-   FILTER GAMES
-========================= */
+let selectedCategory = "all";
 
-function filterGames(category, button) {
-
-    const cards =
-        document.querySelectorAll(".game-card");
-
-    const tabs =
-        document.querySelectorAll(".tab");
-
-
-    tabs.forEach(tab => {
-        tab.classList.remove("active");
-    });
-
-    button.classList.add("active");
-
+function filterGames() {
+    const searchText = search.value.toLowerCase();
+    let visibleCount = 0;
 
     cards.forEach(card => {
+        const title = card.querySelector("h3").textContent.toLowerCase();
+        const description = card.querySelector("p").textContent.toLowerCase();
+        const category = card.dataset.category;
 
-        if (
-            category === "all" ||
-            card.dataset.category === category
-        ) {
+        const matchesSearch =
+            title.includes(searchText) ||
+            description.includes(searchText);
 
-            card.style.display = "block";
+        const matchesCategory =
+            selectedCategory === "all" ||
+            category === selectedCategory;
 
+        if (matchesSearch && matchesCategory) {
+            card.style.display = "";
+            visibleCount++;
         } else {
-
             card.style.display = "none";
-
         }
-
-    });
-}
-
-
-/* =========================
-   PLAY BUTTON
-========================= */
-
-function playGame(game) {
-
-    alert(
-        "Opening " + game + "..."
-    );
-
-    // Later you can replace this with:
-    //
-    // window.location.href =
-    // "games/" + game.toLowerCase() + ".html";
-
-}
-
-
-/* =========================
-   SEARCH
-========================= */
-
-document
-.getElementById("search")
-.addEventListener("input", function() {
-
-    const search =
-        this.value.toLowerCase();
-
-    const cards =
-        document.querySelectorAll(".game-card");
-
-
-    cards.forEach(card => {
-
-        const name =
-            card.querySelector("h2")
-            .textContent
-            .toLowerCase();
-
-
-        if (name.includes(search)) {
-
-            card.style.display = "block";
-
-        } else {
-
-            card.style.display = "none";
-
-        }
-
     });
 
+    noResults.style.display = visibleCount === 0 ? "block" : "none";
+}
+
+search.addEventListener("input", filterGames);
+
+buttons.forEach(button => {
+    button.addEventListener("click", () => {
+        buttons.forEach(btn => btn.classList.remove("active"));
+
+        button.classList.add("active");
+        selectedCategory = button.dataset.category;
+
+        filterGames();
+    });
 });
-
 </script>
 
 </body>
