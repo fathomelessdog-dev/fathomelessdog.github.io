@@ -1,0 +1,21 @@
+{
+    "platforms": {},
+    "disableLoadingLogo": true,
+    "saas": {
+        "publicToken": "cmti47hkl1dtzn00hfknundvy"
+    },
+    "advertisement": {
+        "minimumDelayBetweenInterstitial": 30,
+        "initialInterstitialDelay": 0,
+        "interstitial": {
+            "preloadOnStart": "round_end",
+            "placementFallback": "round_end",
+            "placements": [
+                { "id": "round_end" }
+            ]
+        },
+        "banner": {
+            "disable": false
+        }
+    }
+}
