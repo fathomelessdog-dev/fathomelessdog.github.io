@@ -1,0 +1,2156 @@
+/* Daily Challenge styles — stays off the gigantic globals.scss */
+
+.daily-streak-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.12em 0.55em;
+  border-radius: 999px;
+  font-size: 0.62em;
+  font-weight: 600;
+  color: #1a0a00;
+  background: linear-gradient(135deg, #ffd27a 0%, #ff7a1a 60%, #e04b1a 100%);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: 0 2px 6px rgba(224, 75, 26, 0.45),
+              inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  /* One line, always. As a flex item (the home menu row) the pill shrank
+     to its min-content under a narrow rail and wrapped "1 day" onto two
+     lines (owner, Aug 29: "shouldnt wrap"). */
+  white-space: nowrap;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.daily-streak-pill.pulsing {
+  animation: dailyStreakPulse 2.4s ease-in-out infinite;
+}
+.daily-streak-pill.done {
+  background: linear-gradient(135deg, #8be0a0 0%, #3ea35a 100%);
+  color: #072814;
+  box-shadow: 0 2px 6px rgba(62, 163, 90, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.daily-streak-pill.at-risk {
+  background: linear-gradient(135deg, #ff8a4c 0%, #dc3545 100%);
+  box-shadow: 0 0 14px rgba(220, 53, 69, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+  animation: dailyStreakAtRisk 1.2s ease-in-out infinite;
+}
+.daily-streak-pill.diamond {
+  background: linear-gradient(135deg, #e4f9ff 0%, #b9f2ff 60%, #5ed0e6 100%);
+  color: #083644;
+  box-shadow: 0 2px 10px rgba(94, 208, 230, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+@keyframes dailyStreakPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 2px 6px rgba(224, 75, 26, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+  50% { transform: scale(1.08); box-shadow: 0 4px 14px rgba(255, 140, 40, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.55); }
+}
+@keyframes dailyStreakAtRisk {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
+}
+
+/* (Removed) `.daily-community-maps-btn`, its hover/focus rules, its svg and
+   label rules, and the component that rendered it
+   (components/daily/DailyCommunityMapsButton.js). Community Maps is a footer
+   button now — one of .footer_btns' square icon buttons, styled by that row
+   like every other button in it, so none of this markup or CSS has a second
+   home to keep in sync.
+
+   (Removed earlier) `.daily-community-maps-btn--below-login` and
+   `@keyframes dailyMapsBtnBounce`. */
+
+/* In-game HUD — sits below the top navbar (which is 50px tall at z-index 1120)
+   and is horizontally centered so it doesn't collide with the WorldGuessr
+   logo (left) or the back button and timer (right). */
+.daily-round-badge {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1150;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.45em 0.9em;
+  border-radius: 14px;
+  background: var(--gradLight);
+  background-color: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px);
+  color: white;
+  font-size: 0.9em;
+  font-weight: 500;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: calc(100vw - 24px);
+}
+@media (max-width: 600px) {
+  .daily-round-badge {
+    top: 54px;
+    font-size: 0.78em;
+    padding: 0.35em 0.7em;
+  }
+}
+.daily-round-badge .dot-row {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 0.5em;
+}
+.daily-round-badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+}
+.daily-round-badge .dot.done { background: #ffd700; }
+.daily-round-badge .dot.current { background: #4CAF50; box-shadow: 0 0 6px #4CAF50; }
+
+/* Results modal */
+@keyframes dailyResultsBackdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dailyResultsCardEnter {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.daily-results-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Crossfade in over the final-round StreetView (kept mounted on phase
+     === 'results') so the modal appears smoothly instead of snapping. */
+  animation: dailyResultsBackdropFadeIn 320ms ease-out both;
+}
+.daily-results-backdrop > .daily-results-card {
+  animation: dailyResultsCardEnter 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.daily-results-card {
+  width: 100%;
+  max-width: 720px;
+  max-height: 92vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--gradLight);
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 28px 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  color: white;
+  animation: dailyResultsAppear 0.4s cubic-bezier(0.2, 0.7, 0.3, 1.2);
+  position: relative;
+}
+@keyframes dailyResultsAppear {
+  from { opacity: 0; transform: scale(0.96) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.daily-results-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.2s;
+}
+.daily-results-close:hover { opacity: 1; }
+
+.daily-header-label {
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.75);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.daily-header-score {
+  font-family: "Jockey One", "Jockey One Fallback", sans-serif;
+  font-size: clamp(2.6rem, 8vw, 4.2rem);
+  color: #4CAF50;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  line-height: 1.05;
+  margin: 4px 0 6px;
+  transition: filter 0.3s ease;
+}
+.daily-header-score.animating {
+  filter: drop-shadow(0 0 8px rgba(76, 175, 80, 0.6));
+}
+.daily-header-score .max {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.55em;
+  margin-left: 0.2em;
+}
+.daily-header-stars {
+  display: flex;
+  gap: 0.4em;
+  justify-content: flex-start;
+  align-items: center;
+  margin: 8px 0;
+}
+.daily-motivational-quip {
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 1rem;
+  margin: 8px 0 14px;
+  text-align: center;
+  max-width: 80%;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+}
+.daily-header-star {
+  display: inline-flex;
+  align-items: center;
+  animation: starAppear 0.5s ease-in-out forwards;
+  opacity: 0;
+  transform: scale(0);
+}
+.daily-header-star svg {
+  font-size: 1.8rem;
+}
+.daily-header-star img {
+  width: 1.8rem;
+  height: 1.8rem;
+  object-fit: contain;
+  filter: drop-shadow(0 0 6px rgba(185, 242, 255, 0.5));
+}
+.daily-header-star.tier-gold svg {
+  filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.55));
+}
+.daily-header-star.tier-silver svg {
+  filter: drop-shadow(0 0 3px rgba(205, 127, 50, 0.4));
+}
+.daily-header-rank {
+  font-size: 1rem;
+  color: white;
+  margin-bottom: 6px;
+}
+.daily-header-rank .rank-num { color: #ffd700; font-weight: 700; }
+.daily-header-rank .pct { color: #ffd700; font-weight: 700; }
+.daily-header-streak-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6em;
+  margin-top: 4px;
+  flex-wrap: wrap;
+  color: rgba(255, 255, 255, 0.9);
+}
+.daily-personal-best-ribbon {
+  text-align: center;
+  background: linear-gradient(90deg, transparent, #ffd700 20%, #ffb300 50%, #ffd700 80%, transparent);
+  color: #1a0a00;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+  animation: shimmerRibbon 2.5s linear infinite;
+  background-size: 200% 100%;
+}
+.daily-disqualified-ribbon {
+  text-align: center;
+  background: rgba(220, 53, 69, 0.18);
+  color: #ff9a8c;
+  border: 1px solid rgba(220, 53, 69, 0.5);
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 0.92rem;
+}
+@keyframes shimmerRibbon {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.daily-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 24px;
+}
+@media (max-width: 650px) {
+  .daily-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.daily-stat-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+.daily-stat-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.daily-stat-title {
+  font-family: "Jockey One", "Jockey One Fallback", sans-serif;
+  font-size: 1.4rem;
+  color: #ffd700;
+  margin-bottom: 12px;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
+/* Streak flame burst — full-viewport celebratory overlay. Fires once on
+   streak start/extend, self-unmounts after ~3s. Pointer-events: none so
+   the results UI underneath stays interactive. */
+/* Streak flame burst */
+.daily-flame-burst {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 11000;
+}
+
+.daily-flame-backdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(60, 20, 0, 0.85) 0%, rgba(0, 0, 0, 0.95) 100%);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.daily-flame-burst--entering .daily-flame-backdrop,
+.daily-flame-burst--holding .daily-flame-backdrop {
+  opacity: 1;
+}
+.daily-flame-burst--leaving .daily-flame-backdrop {
+  opacity: 0;
+}
+
+.daily-flame-glow {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle at center, rgba(255, 160, 0, 0.4) 0%, rgba(255, 80, 0, 0.15) 40%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(20px);
+  transform: scale(0.5);
+  opacity: 0;
+  transition: all 0.8s cubic-bezier(0.2, 1, 0.3, 1);
+}
+.daily-flame-burst--entering .daily-flame-glow,
+.daily-flame-burst--holding .daily-flame-glow {
+  transform: scale(1.5);
+  opacity: 1;
+}
+.daily-flame-burst--leaving .daily-flame-glow {
+  transform: scale(2);
+  opacity: 0;
+}
+
+.daily-flame-core {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  opacity: 0;
+  transform: scale(0.2);
+  transition: all 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.daily-flame-burst--entering .daily-flame-core,
+.daily-flame-burst--holding .daily-flame-core {
+  opacity: 1;
+  transform: scale(1);
+}
+.daily-flame-burst--leaving .daily-flame-core {
+  opacity: 0;
+  transform: scale(1.3);
+  transition: all 0.5s ease-in;
+}
+
+.daily-flame-text {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.daily-flame-icon {
+  font-size: 4rem;
+  line-height: 1;
+  filter: drop-shadow(0 4px 16px rgba(255, 120, 0, 0.7));
+  animation: dailyFlameFloat 3s ease-in-out infinite alternate;
+}
+
+.daily-flame-number {
+  font-family: "Jockey One", "Jockey One Fallback", sans-serif;
+  font-size: clamp(4.5rem, 12vw, 6.5rem);
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(255, 160, 0, 0.8), 0 4px 24px rgba(255, 80, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.daily-flame-label {
+  font-family: "DM Sans", sans-serif;
+  font-size: clamp(1.2rem, 3vw, 1.6rem);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #ffdca8;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes dailyFlameFloat {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-6px); }
+}
+
+.daily-flame-ember {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 10px 2px #ff8c00, 0 0 20px 4px #ff3c00;
+  top: 50%;
+  left: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0);
+}
+.daily-flame-burst--entering .daily-flame-ember,
+.daily-flame-burst--holding .daily-flame-ember {
+  animation: dailyFlameEmberFly var(--duration) cubic-bezier(0.2, 0.8, 0.3, 1) var(--delay) forwards;
+}
+
+@keyframes dailyFlameEmberFly {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--dx) * 0.3), calc(-50% + var(--dy) * 0.3)) scale(var(--scale));
+  }
+  100% {
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy) - 60px)) scale(0);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daily-flame-core {
+    transform: scale(1) !important;
+    transition: opacity 0.5s ease !important;
+  }
+  .daily-flame-glow {
+    transform: scale(1.5) !important;
+    transition: opacity 0.5s ease !important;
+  }
+  .daily-flame-icon {
+    animation: none !important;
+  }
+  .daily-flame-ember {
+    display: none !important;
+  }
+}
+
+/* Personal records card — unique to results, replaces redundant top10 */
+.daily-records-card {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.08) 0%, rgba(255, 122, 26, 0.06) 100%);
+  border-color: rgba(255, 215, 0, 0.22);
+}
+.daily-records-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.daily-record-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+}
+.daily-record-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.daily-record-label {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+.daily-record-value {
+  color: white;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.daily-record-new-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #1a0a00;
+  background: linear-gradient(135deg, #ffd700, #ffb300);
+  padding: 2px 8px;
+  border-radius: 999px;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.5);
+  animation: dailyRecordNewPulse 1.8s ease-in-out infinite;
+}
+@keyframes dailyRecordNewPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 12px rgba(255, 215, 0, 0.5); }
+  50% { transform: scale(1.06); box-shadow: 0 0 18px rgba(255, 215, 0, 0.8); }
+}
+.daily-records-empty {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.95rem;
+  text-align: center;
+  padding: 16px 8px;
+  font-style: italic;
+}
+
+.daily-round-badges {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 16px;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+.daily-round-badge-item {
+  background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+  border: 2px solid var(--badge-color, #4CAF50);
+  border-radius: 20px;
+  padding: 12px 20px;
+  min-width: 100px;
+  text-align: center;
+  position: relative;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.3), inset 0 2px 10px rgba(255,255,255,0.05);
+  animation: badgePop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) backwards;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.daily-round-badge-item--clickable {
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.daily-round-badge-item--clickable:hover {
+  transform: translateY(-3px) scale(1.03);
+  box-shadow: 0 10px 18px rgba(0,0,0,0.4), inset 0 2px 10px rgba(255,255,255,0.1),
+              0 0 0 2px var(--badge-color, #4CAF50);
+}
+.daily-round-badge-map-hint {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 4px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+.daily-round-badge-item--clickable:hover .daily-round-badge-map-hint {
+  color: rgba(255, 255, 255, 0.9);
+}
+@keyframes badgePop {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.daily-round-badge-num {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.7);
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.daily-round-badge-score {
+  font-family: "Jockey One", "Jockey One Fallback", sans-serif;
+  font-size: 1.8rem;
+  color: var(--badge-color, #4CAF50);
+  line-height: 1;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+.daily-round-badge-diff {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+  display: inline-block;
+  margin-top: 6px;
+}
+.daily-round-badge-diff.above-avg {
+  background: rgba(76, 175, 80, 0.2);
+  color: #8be0a0;
+}
+.daily-round-badge-diff.exact-avg {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+.daily-round-badge-star {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: #ffd700;
+  color: #1a0a00;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: bold;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  border: 2px solid #fff;
+}
+
+.daily-hero-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.08) 0%, transparent 70%);
+  padding: 20px 0;
+  border-radius: 24px;
+  margin-bottom: 10px;
+}
+
+/* Distribution chart */
+.daily-distribution-chart-wrap {
+  position: relative;
+  width: 100%;
+}
+.daily-distribution-chart {
+  width: 100%;
+  height: 180px;
+  display: block;
+  overflow: visible;
+}
+.daily-distribution-tooltip {
+  position: absolute;
+  bottom: calc(100% - 6px);
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  color: white;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  animation: daily-tooltip-in 120ms ease-out;
+}
+.daily-distribution-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.92);
+}
+.daily-distribution-tooltip-range {
+  font-weight: 700;
+  color: #ffd700;
+  font-variant-numeric: tabular-nums;
+}
+.daily-distribution-tooltip-count {
+  color: rgba(255, 255, 255, 0.78);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes daily-tooltip-in {
+  from { opacity: 0; transform: translate(-50%, 4px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.daily-distribution-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.95rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+/* Pre-play incentive hook — subtitle tucked right under the "Today's Scores"
+   title (negative top margin eats into the title row's 14px gap). */
+.daily-distribution-hook {
+  margin: -8px 0 14px;
+  color: #ffd700;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.daily-distribution-standing {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 215, 0, 0.08);
+  border: 1px solid rgba(255, 215, 0, 0.25);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+.daily-distribution-pct {
+  color: #ffd700;
+  font-weight: 700;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+.daily-distribution-rank {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.daily-distribution-user-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: #ffd700;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  max-width: calc(100% - 8px);
+}
+.daily-distribution-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+.daily-distribution-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+/* Pre-play only the plays count renders — keep it on the right edge where it
+   always sits. */
+.daily-distribution-meta span:only-child {
+  margin-left: auto;
+}
+
+/* Leaderboard (top-100 modal, opened from the landing's scores section) */
+.daily-leaderboard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.daily-leaderboard-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.daily-leaderboard-row:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(1.01);
+}
+.rank-name-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.daily-leaderboard-row .rank {
+  min-width: 34px;
+  text-align: center;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 1.1rem;
+}
+.daily-leaderboard-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 1rem;
+}
+.daily-leaderboard-name-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.daily-leaderboard-name-link:hover {
+  color: #4CAF50;
+  text-decoration: underline;
+}
+.daily-leaderboard-row .score {
+  font-family: "Jockey One", "Jockey One Fallback", sans-serif;
+  font-weight: 400;
+  font-size: 1.3rem;
+  color: #4CAF50;
+  font-variant-numeric: tabular-nums;
+}
+.daily-leaderboard-row.self {
+  background: linear-gradient(90deg, rgba(76, 175, 80, 0.2), rgba(76, 175, 80, 0.05));
+  border: 1px solid rgba(76, 175, 80, 0.4);
+}
+.daily-leaderboard-separator {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 1.2rem;
+  margin: 4px 0;
+  letter-spacing: 4px;
+}
+.daily-leaderboard-signin {
+  padding: 16px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.daily-leaderboard-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+.daily-leaderboard-pagination span {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.daily-leaderboard-pagination button {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 10px;
+  padding: 6px 14px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.daily-leaderboard-pagination button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+.daily-leaderboard-pagination button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Round breakdown — bar graph */
+.daily-round-bars {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 8px 4px 4px;
+}
+.daily-round-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 72px;
+}
+.daily-round-bar-track {
+  width: 100%;
+  max-width: 56px;
+  height: 150px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px 8px 4px 4px;
+  position: relative;
+  overflow: visible;
+  display: flex;
+  align-items: flex-end;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.daily-round-bar-fill {
+  width: 100%;
+  background: linear-gradient(180deg, var(--bar-color, #4CAF50) 0%, color-mix(in srgb, var(--bar-color, #4CAF50) 70%, black) 100%);
+  border-radius: 6px 6px 3px 3px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  animation: dailyBarGrow 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: bottom;
+  position: relative;
+  z-index: 1;
+}
+@keyframes dailyBarGrow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+.daily-round-bar-avg {
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  height: 0;
+  border-top: 2px dashed rgba(255, 255, 255, 0.55);
+  z-index: 2;
+  pointer-events: auto;
+}
+.daily-round-bar-avg::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
+}
+.daily-round-bar-avg-label {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: -0.55em;
+  font-size: 0.58rem;
+  color: rgba(255, 255, 255, 0.65);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.daily-round-bar:hover .daily-round-bar-avg-label,
+.daily-round-bar-avg:hover .daily-round-bar-avg-label {
+  opacity: 1;
+}
+.daily-round-bar-label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.daily-round-bar-sub {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: center;
+}
+.daily-round-bar-score-value {
+  font-weight: 700;
+  color: var(--bar-color, #4CAF50);
+}
+.daily-round-bar-score-unit {
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+  font-size: 0.88em;
+}
+.daily-round-bar-perfect {
+  color: #ffd700;
+  font-size: 0.95em;
+  filter: drop-shadow(0 0 3px rgba(255, 215, 0, 0.6));
+}
+@media (max-width: 480px) {
+  .daily-round-bars { gap: 6px; }
+  .daily-round-bar-track { height: 120px; }
+  .daily-round-bar-sub { font-size: 0.68rem; }
+  .daily-round-bar-avg-label { display: none; }
+}
+
+
+/* Action buttons */
+.daily-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.daily-actions > button {
+  flex: 1;
+  min-width: 140px;
+  padding: 12px 18px;
+  font-size: 1rem;
+  font-weight: 500;
+  font-family: inherit;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+}
+
+/* Share button — primary CTA on the results screen.
+   Bigger, brighter, gradient + soft pulsing glow draws the eye without
+   being gaudy. A periodic shine sweep adds life. The back button is
+   intentionally quieter so the visual hierarchy points at "Share". */
+.daily-actions > .daily-share-btn {
+  flex: 1 1 0;
+  min-width: 160px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 22px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+  font-family: inherit;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    linear-gradient(135deg, #2ecc71 0%, #1f9d55 55%, #16864a 100%);
+  box-shadow:
+    0 6px 18px rgba(46, 204, 113, 0.35),
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.25s ease,
+    filter 0.2s ease;
+  animation: dailyShareIdlePulse 2.6s ease-in-out infinite;
+  will-change: transform, box-shadow;
+}
+
+.daily-share-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05em;
+  transition: transform 0.25s ease;
+}
+
+.daily-share-btn__label {
+  position: relative;
+  z-index: 1;
+}
+
+/* Diagonal shine sweep — kicked off every cycle by the keyframe schedule
+   so it doesn't compete with the idle pulse. Pure transform/opacity keeps
+   it cheap on the GPU. */
+.daily-share-btn__shine {
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 45%,
+    rgba(255, 255, 255, 0.45) 50%,
+    rgba(255, 255, 255, 0.18) 55%,
+    transparent 100%
+  );
+  transform: skewX(-18deg);
+  pointer-events: none;
+  animation: dailyShareShine 4.2s ease-in-out infinite;
+  animation-delay: 0.8s;
+  z-index: 0;
+}
+
+.daily-actions > .daily-share-btn:hover {
+  transform: translateY(-2px) scale(1.015);
+  filter: brightness(1.08);
+  box-shadow:
+    0 10px 26px rgba(46, 204, 113, 0.5),
+    0 1px 0 rgba(255, 255, 255, 0.25) inset,
+    0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+  animation-play-state: paused;
+}
+
+.daily-actions > .daily-share-btn:hover .daily-share-btn__icon {
+  transform: rotate(-8deg) scale(1.1);
+}
+
+.daily-actions > .daily-share-btn:active {
+  transform: translateY(0) scale(0.99);
+  box-shadow: 0 4px 12px rgba(46, 204, 113, 0.35);
+}
+
+.daily-actions > .daily-share-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(46, 204, 113, 0.55),
+    0 6px 18px rgba(46, 204, 113, 0.35);
+}
+
+/* Copied confirmation — swap to a calmer green and stop drawing attention,
+   the action is done. */
+.daily-actions > .daily-share-btn.is-copied {
+  background: linear-gradient(135deg, #1f9d55 0%, #15703a 100%);
+  animation: none;
+  box-shadow: 0 4px 12px rgba(31, 157, 85, 0.3);
+}
+.daily-actions > .daily-share-btn.is-copied .daily-share-btn__shine { display: none; }
+
+@keyframes dailyShareIdlePulse {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    box-shadow:
+      0 6px 18px rgba(46, 204, 113, 0.32),
+      0 1px 0 rgba(255, 255, 255, 0.18) inset,
+      0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  }
+  50% {
+    transform: translateY(-1px) scale(1.012);
+    box-shadow:
+      0 8px 22px rgba(46, 204, 113, 0.55),
+      0 1px 0 rgba(255, 255, 255, 0.22) inset,
+      0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+  }
+}
+
+@keyframes dailyShareShine {
+  0%, 65% { transform: translateX(0) skewX(-18deg); opacity: 0; }
+  70% { opacity: 1; }
+  100% { transform: translateX(380%) skewX(-18deg); opacity: 0; }
+}
+
+/* Back button — secondary, glassy, restrained. */
+.daily-actions > .daily-back-btn {
+  flex: 1 1 0;
+  min-width: 160px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 18px;
+  font-size: 0.98rem;
+  font-weight: 500;
+  font-family: inherit;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.daily-actions > .daily-back-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daily-actions > .daily-share-btn { animation: none; }
+  .daily-share-btn__shine { display: none; }
+  .daily-actions > .daily-share-btn:hover {
+    transform: none;
+  }
+}
+.daily-next-countdown {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Landing — uses fixed positioning so the flex-row `.home` parent can't squeeze it.
+   Background comes from home.js's site-background layer (fixed, always rendered). */
+.daily-page-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 119;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.45);
+}
+.daily-page-backdrop--opening {
+  animation: dailyBackdropIn 0.5s ease-out both;
+}
+@keyframes dailyBackdropIn {
+  from { background: rgba(0, 0, 0, 0); }
+  to { background: rgba(0, 0, 0, 0.45); }
+}
+.daily-landing {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  color: white;
+  background: transparent;
+  padding: clamp(20px, 4vw, 40px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+.daily-landing--opening .daily-landing-hero,
+.daily-landing--opening .daily-landing-section {
+  animation: dailyLandingContentIn 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.daily-landing--opening .daily-landing-section:nth-of-type(2) {
+  animation-delay: 80ms;
+}
+.daily-landing--opening .daily-landing-section:nth-of-type(3) {
+  animation-delay: 150ms;
+}
+.daily-landing--opening .daily-landing-section:nth-of-type(4) {
+  animation-delay: 220ms;
+}
+@keyframes dailyLandingContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.daily-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 1.1rem;
+}
+
+/* Post-game submitting overlay — covers the lingering Street View while we
+   await /submit + /results. Uses the same warm-green gradient family as the
+   results card so the transition feels like a natural step in the daily
+   flow, not a hard cut to black. The fade is slow + eased so it never
+   reads as a "flash". A small frosted card holds the spinner + text so the
+   eye lands somewhere instead of on a flat overlay. */
+.daily-submitting {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 40%, rgba(36, 87, 52, 0.32) 0%, rgba(36, 87, 52, 0) 70%),
+    linear-gradient(180deg, rgba(8, 22, 14, 0.78) 0%, rgba(3, 12, 7, 0.88) 100%);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  color: white;
+  animation: dailySubmittingFade 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.daily-submitting__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 32px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.daily-submitting__spinner {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.14);
+  border-top-color: #4caf50;
+  animation: dailySubmittingSpin 0.9s linear infinite;
+  margin-bottom: 4px;
+  filter: drop-shadow(0 0 10px rgba(76, 175, 80, 0.35));
+}
+
+.daily-submitting__title {
+  font-size: clamp(1.1rem, 2.4vw, 1.45rem);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #fff;
+}
+
+.daily-submitting__hint {
+  font-size: clamp(0.85rem, 1.6vw, 1rem);
+  color: rgba(255, 255, 255, 0.65);
+  max-width: 420px;
+}
+
+@keyframes dailySubmittingSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes dailySubmittingFade {
+  from { opacity: 0; backdrop-filter: blur(0) saturate(100%); -webkit-backdrop-filter: blur(0) saturate(100%); }
+  to { opacity: 1; backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daily-submitting__spinner { animation-duration: 2s; }
+  .daily-submitting { animation: none; }
+}
+.daily-game-shell {
+  display: contents;
+}
+.daily-landing-hero {
+  text-align: center;
+  max-width: 820px;
+  padding: 40px 20px 20px;
+}
+.daily-landing-title {
+  font-family: "Jockey One", "Jockey One Fallback", sans-serif;
+  font-size: clamp(2.4rem, 7vw, 4.6rem);
+  line-height: 1.05;
+  margin-bottom: 24px;
+  text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.6);
+}
+.daily-landing-tagline {
+  font-size: clamp(1rem, 2.2vw, 1.25rem);
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 24px;
+}
+.daily-landing-cta {
+  padding: 16px 40px;
+  font-size: 1.15rem;
+  font-weight: 500;
+  border-radius: 14px;
+  cursor: pointer;
+  background: var(--primary) !important;
+  color: white;
+  border: 1.4px solid var(--primaryDark);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
+}
+.daily-landing-cta:hover {
+  background: #2c6a3f !important;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  transform: translateY(-1px) scale(1.02);
+}
+.daily-landing-cta-subtitle,
+.daily-landing-cta-countdown {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 400;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.75);
+}
+.daily-landing-cta.played {
+  background: rgba(76, 175, 80, 0.9) !important;
+  border-color: rgba(76, 175, 80, 0.85);
+}
+.daily-landing-cta.played .daily-landing-cta-subtitle {
+  color: #e8f7ea;
+  font-weight: 500;
+}
+.daily-landing-user-stats {
+  display: flex;
+  gap: 18px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+// Grace-day notice — appears under the CTA when the user's streak is alive
+// today only because of the unused-grace branch (server flag userData.graceDay).
+// Pulses to draw the eye since missing today drops the streak at midnight.
+.daily-landing-grace-banner {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255, 152, 0, 0.16);
+  border: 1px solid rgba(255, 152, 0, 0.55);
+  color: #ffd28a;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 0 18px rgba(255, 152, 0, 0.25);
+  animation: dailyLandingGracePulse 2.4s ease-in-out infinite;
+}
+
+@keyframes dailyLandingGracePulse {
+  0%, 100% {
+    box-shadow: 0 0 14px rgba(255, 152, 0, 0.22);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(255, 152, 0, 0.45);
+    transform: scale(1.02);
+  }
+}
+
+.daily-landing-section {
+  width: 100%;
+  max-width: 820px;
+  background: var(--gradLight);
+  background-color: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.daily-landing-section-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+  letter-spacing: 0.02em;
+}
+/* Title + right-aligned accessory (e.g. the leaderboard button) */
+.daily-landing-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.daily-landing-section-title-row .daily-landing-section-title {
+  margin-bottom: 0;
+}
+/* Deliberately understated — the distribution is the headline, the top-100
+   board is opt-in. */
+.daily-leaderboard-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s ease;
+}
+.daily-leaderboard-open-btn svg {
+  color: #ffd700;
+}
+.daily-leaderboard-open-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.daily-landing-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+.daily-landing-about-btn {
+  margin-top: 12px;
+}
+.daily-landing-step {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.daily-landing-step svg { font-size: 1.5rem; color: #ffd700; }
+.daily-landing-step-text { color: rgba(255, 255, 255, 0.85); font-size: 0.95rem; }
+
+/* 14-day history bar chart — replaces the old binary streak calendar. Each
+   bar height ∝ score, tier-colored, with today pulsing. Stubs mark missed
+   days so gaps are visible without being loud. */
+.daily-history-bars14 {
+  position: relative;
+  margin-top: 14px;
+  padding: 14px 10px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+}
+.daily-history-bars14-plot {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 120px;
+}
+.daily-history-bar {
+  flex: 1 1 0;
+  min-width: 12px;
+  position: relative;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.daily-history-bar:focus { outline: none; }
+.daily-history-bar:focus-visible .daily-history-bar-fill {
+  box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.6);
+}
+.daily-history-bar-fill {
+  width: 100%;
+  height: var(--bar-h, 6%);
+  border-radius: 4px 4px 2px 2px;
+  transition: filter 0.15s ease;
+  background: #555;
+}
+.daily-history-bar:hover .daily-history-bar-fill { filter: brightness(1.2); }
+.daily-history-bar.stub .daily-history-bar-fill {
+  background: rgba(255, 255, 255, 0.12);
+}
+.daily-history-bar.tier-low .daily-history-bar-fill {
+  background: linear-gradient(180deg, #ff6b6b 0%, #c73030 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.daily-history-bar.tier-mid .daily-history-bar-fill {
+  background: linear-gradient(180deg, #ffd54f 0%, #c68a00 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+.daily-history-bar.tier-high .daily-history-bar-fill {
+  background: linear-gradient(180deg, #6ed890 0%, #2f8a4b 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+.daily-history-bar.tier-gold .daily-history-bar-fill {
+  background: linear-gradient(180deg, #ffe68a 0%, #ffb300 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3),
+              0 0 10px rgba(255, 200, 80, 0.4);
+}
+.daily-history-bar.tier-platinum .daily-history-bar-fill {
+  background: linear-gradient(180deg, #f5faff 0%, #b9f2ff 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6),
+              0 0 16px rgba(185, 242, 255, 0.7);
+}
+.daily-history-bar.today .daily-history-bar-fill {
+  animation: dailyHistoryTodayPulse 2s ease-in-out infinite;
+}
+.daily-history-bar.today-unplayed .daily-history-bar-fill {
+  background: transparent;
+  border: 2px dashed rgba(255, 215, 0, 0.55);
+  height: 100%;
+  border-radius: 4px;
+  animation: none;
+}
+@keyframes dailyHistoryTodayPulse {
+  0%, 100% { filter: brightness(1) drop-shadow(0 0 0 rgba(255, 215, 0, 0)); }
+  50%      { filter: brightness(1.25) drop-shadow(0 0 8px rgba(255, 215, 0, 0.75)); }
+}
+
+.daily-history-bars14-tooltip {
+  position: absolute;
+  left: calc(10px + (100% - 20px) * ((var(--bar-idx) + 0.5) / var(--bar-count)));
+  transform: translateX(-50%);
+  bottom: calc(100% + 4px);
+  background: rgba(0, 0, 0, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: white;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  animation: daily-tooltip-in 120ms ease-out;
+}
+.daily-history-bars14-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.92);
+}
+.daily-history-bars14-tooltip-date {
+  font-weight: 700;
+  color: #ffd700;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  margin-bottom: 2px;
+}
+.daily-history-bars14-tooltip-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.daily-history-bars14-tooltip-stats.muted { color: rgba(255, 255, 255, 0.7); font-style: italic; }
+.daily-history-bars14-tooltip-score { font-weight: 700; color: white; }
+.daily-history-bars14-tooltip-rank { color: rgba(255, 255, 255, 0.7); font-size: 0.8rem; }
+
+@media (max-width: 500px) {
+  .daily-history-bars14-plot { height: 96px; gap: 3px; }
+  .daily-history-bar { min-width: 10px; }
+}
+
+/* Share modal */
+.daily-share-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-out;
+}
+.daily-share-modal-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--gradLight);
+  background-color: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
+  padding: 24px;
+  color: white;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+.daily-share-text {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  padding: 14px;
+  margin: 12px 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+/* Confirm-start modal */
+.daily-confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+.daily-confirm-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--gradLight);
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
+  padding: 24px;
+  color: white;
+  text-align: center;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  animation: dailyConfirmCardIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes dailyConfirmCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.daily-confirm-card h3 {
+  font-family: "Jockey One", "Jockey One Fallback", sans-serif;
+  font-size: 1.5rem;
+  margin-bottom: 8px;
+}
+.daily-confirm-card p { color: rgba(255, 255, 255, 0.85); margin-bottom: 18px; }
+.daily-confirm-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+/* Start-confirm modal — bigger card, prominent CTA, low-emphasis cancel */
+.daily-confirm-card--start {
+  max-width: 480px;
+  padding: 30px 28px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+}
+.daily-confirm-card--start h3 {
+  font-size: 1.85rem;
+  margin: 0 0 6px;
+  letter-spacing: 0.01em;
+}
+.daily-confirm-icon {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(76, 175, 80, 0.5), rgba(76, 175, 80, 0.12) 70%);
+  border: 1px solid rgba(76, 175, 80, 0.55);
+  color: #ffe27a;
+  font-size: 1.55rem;
+  box-shadow:
+    0 0 24px rgba(76, 175, 80, 0.3),
+    0 1px 0 rgba(255, 255, 255, 0.18) inset;
+  animation: dailyConfirmIconIn 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both 0.05s;
+}
+@keyframes dailyConfirmIconIn {
+  from { opacity: 0; transform: scale(0.6) rotate(-8deg); }
+  to   { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.daily-confirm-card--start .daily-confirm-tagline {
+  margin: 0 0 16px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 1.02rem;
+  line-height: 1.45;
+}
+.daily-confirm-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  background: rgba(255, 193, 7, 0.10);
+  border: 1px solid rgba(255, 193, 7, 0.28);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 22px;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  color: rgba(255, 230, 170, 0.95);
+
+  svg {
+    color: #ffc107;
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 0.95rem;
+  }
+}
+.daily-confirm-actions--stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  justify-content: stretch;
+}
+.daily-confirm-primary {
+  width: 100%;
+  padding: 15px 24px;
+  font-size: 1.08rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 12px;
+  cursor: pointer;
+  color: white;
+  border: 1px solid rgba(76, 175, 80, 0.7);
+  background: linear-gradient(180deg, #5cba60 0%, #347a37 100%);
+  box-shadow:
+    0 8px 22px rgba(76, 175, 80, 0.38),
+    0 1px 0 rgba(255, 255, 255, 0.2) inset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+
+  svg {
+    transition: transform 0.18s ease;
+    font-size: 0.95rem;
+  }
+}
+.daily-confirm-primary:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow:
+    0 12px 28px rgba(76, 175, 80, 0.5),
+    0 1px 0 rgba(255, 255, 255, 0.22) inset;
+
+  svg { transform: translateX(4px); }
+}
+.daily-confirm-primary:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+.daily-confirm-primary:focus-visible {
+  outline: 2px solid #ffd86b;
+  outline-offset: 2px;
+}
+.daily-confirm-cancel {
+  background: transparent;
+  border: 0;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.92rem;
+  padding: 10px;
+  margin-top: 2px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: color 0.18s ease, background-color 0.18s ease;
+}
+.daily-confirm-cancel:hover {
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.05);
+}
+.daily-confirm-cancel:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.4);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .daily-confirm-card--start { padding: 24px 20px 18px; }
+  .daily-confirm-card--start h3 { font-size: 1.55rem; }
+  .daily-confirm-icon { width: 52px; height: 52px; font-size: 1.35rem; }
+  .daily-confirm-primary { padding: 13px 20px; font-size: 1rem; }
+}
+
+/* Already-played overlay */
+.daily-already-played-inline {
+  margin: 12px 0 18px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-align: center;
+  background: rgba(76, 175, 80, 0.18);
+  color: #d0f0d4;
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  font-size: 0.95rem;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .daily-page-backdrop--opening,
+  .daily-landing--opening .daily-landing-hero,
+  .daily-landing--opening .daily-landing-section,
+  .daily-streak-pill,
+  .daily-streak-pill.pulsing,
+  .daily-streak-pill.at-risk,
+  .daily-personal-best-ribbon,
+  .daily-header-stars svg,
+  .daily-confirm-card,
+  .daily-confirm-icon,
+  .daily-results-card {
+    animation: none !important;
+  }
+}
+
+/* Reveal meta card (scheduled meta days, docs/daily-metas.md). Mounted by
+   gameUI inside .endCards beside #endBanner. Chrome = the .timer HUD recipe
+   (globals.scss): --gradLight over --primaryTransparent, 2px --primary frame,
+   16px radius, the 3-layer shadow, lexend 600 — and, like .timer, NO
+   backdrop-filter. The pano is the Maps Embed API iframe at the meta's view:
+   ONE fixed size (--metaPanoW plus the chrome crop), transform-scaled by
+   DailyMetaCard.js to cover its box — never resized, because relaying out
+   Google's renderer every frame of the hover growth flickers.
+   Desktop: bottom-left column card that EXPANDS on hover (class from
+   mouseenter; the growth is gated to fine pointers below). <=1100px: row
+   card centred above the banner so the answer pins stay visible. Landscape
+   phones: text only. */
+.daily-meta-card {
+  /* 90, not 60: the address box is ~65px, ~85px when the address wraps.
+     Mirrors CROP_TOP in DailyMetaCard.js. */
+  --metaCropTop: 90px;
+  --metaCropRight: 60px;
+  --metaCropBottom: 40px;
+  /* The embed's native visible width (its expanded-desktop size); smaller
+     boxes scale it down. Mirrors PANO_W in DailyMetaCard.js. */
+  --metaPanoW: 720px;
+  /* Resting width, height-capped for short laptops: pano = width / 1.6,
+     leaving ~240px for the text and the banner strip. The text block pins
+     itself to this while the card grows (see __text). */
+  --metaRestW: min(clamp(340px, 26vw, 440px), calc((100vh - 240px) * 1.6), calc(100vw - 32px));
+  position: absolute;
+  left: max(env(safe-area-inset-left), 16px);
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  width: var(--metaRestW);
+  /* ONE scalable unit. The card is a size container; the text block's
+     font-size is a share of the card width (cqw on __text, never here: a
+     cq unit on the container itself measures the next container up, i.e.
+     the viewport, and the type comes out poster-sized) and every length
+     inside it is in em; the pano is width-bound. So the hover growth is a
+     pure zoom: the same line breaks at every width, nothing re-wraps or
+     shifts. The frame stays 2px on purpose. Below 1100px (no hover) the rem
+     sizes further down take over. */
+  container-type: inline-size;
+  /* Above #endBanner (1001) inside .endCards: the hover-expanded card must
+     not slide under the banner. */
+  z-index: 1002;
+  pointer-events: all;
+  color: white;
+  background: var(--gradLight);
+  background-color: var(--primaryTransparent);
+  border: 2px solid var(--primary);
+  border-radius: 16px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    0 4px 12px rgba(36, 87, 52, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  font-family: lexend;
+  font-weight: 600;
+  text-align: left;
+  /* Explicit property, never `all` (the minimap ruling). One eased width
+     change drives the whole zoom (type and pano follow the width); the
+     ease-out curve matches metaCardEnter so the card moves one way. */
+  transition: width 340ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Entrance, staged: the answer scene lands first (0.35s hold), then the
+     card settles up and in, the text follows a beat later, and the pano
+     fades + settles in on its own once its imagery has painted (the
+     `ready` class, held back in DailyMetaCard.js so the embed's loading
+     canvas never flashes through). `backwards`, never `both`/`forwards`: a
+     forwards fill would pin transform + opacity at animation priority and
+     defeat the hover width transition (hudEnter ruling in globals.scss). */
+  animation: metaCardEnter 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.35s backwards;
+}
+@keyframes metaCardEnter {
+  from { opacity: 0; transform: translateY(18px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes metaCardContentEnter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+/* Slow push-in as the imagery appears (on the BOX: the iframe's own
+   transform is the JS cover-fit and must stay untouched). */
+@keyframes metaPanoSettle {
+  from { transform: scale(1.06); }
+  to { transform: none; }
+}
+.daily-meta-card.fading {
+  pointer-events: none;
+  animation: mapFadeOut 0.3s ease forwards;
+}
+.daily-meta-card__pano {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  /* The pano's own anti-flash colour (StreetViewWebView), not drift. */
+  background-color: #1a1a2e;
+}
+/* Fixed-size surface; DailyMetaCard.js writes the transform (cover-fit
+   scale + centring + the top crop, all inside the scale so the crop tracks
+   the content). Dark until the embed document loads, then fades in. */
+.daily-meta-card__pano iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 0;
+  width: calc(var(--metaPanoW) + var(--metaCropRight));
+  height: calc(var(--metaPanoW) / 1.6 + var(--metaCropTop) + var(--metaCropBottom));
+  transform-origin: 0 0;
+  opacity: 0;
+  transition: opacity 0.6s ease-out;
+}
+.daily-meta-card__pano.ready iframe { opacity: 1; }
+.daily-meta-card__pano.ready { animation: metaPanoSettle 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* Width-bound type: 4% of the CARD width (440px rest = 17.6px, 660px
+   expanded = 26.4px). Everything below is in em of it, so the text block is
+   a fixed drawing that the card scales. */
+.daily-meta-card__text {
+  display: flex;
+  flex-direction: column;
+  font-size: 4cqw;
+  gap: 0.22em;
+  padding: 0.7em 0.9em 0.8em;
+  box-sizing: border-box;
+  animation: metaCardContentEnter 0.4s ease-out 0.5s backwards;
+}
+.daily-meta-card__text.cycles { cursor: pointer; }
+/* Lead row: "Tip" left, the pack author right. */
+.daily-meta-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.6em;
+}
+.daily-meta-card__tag {
+  font-size: 0.78em;
+  font-weight: 600;
+  color: #4CAF50;
+}
+.daily-meta-card__title {
+  font-size: 1.15em;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.daily-meta-card__body {
+  margin: 0;
+  font-size: 0.95em;
+  font-weight: 400;
+  line-height: 1.4;
+  opacity: 0.9;
+  /* One paragraph (the importer flattens breaks), no clamp: what you see at
+     rest is the whole tip, and the hover is a zoom of exactly that. Length
+     is governed at import (TIP_SOFT_MAX), not here. */
+}
+.daily-meta-card__dots {
+  display: inline-flex;
+  gap: 0.3em;
+  margin-top: 0.35em;
+}
+.daily-meta-card__dots .dot {
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+}
+.daily-meta-card__dots .dot.current { background: #4CAF50; }
+/* Pack author credit: white against the green "Tip" so it reads first. */
+.daily-meta-card__credit {
+  flex: none;
+  font-size: 0.78em;
+  font-weight: 600;
+  color: #fff;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.daily-meta-card__credit:hover,
+.daily-meta-card__credit:focus-visible {
+  color: #4CAF50;
+  text-decoration: underline;
+  outline: none;
+}
+/* Daily reveal, right-country headline (endBanner.js countryCorrect):
+   "✓ Japan" + flag in the slot "It was Japan" takes on a miss. */
+.correctCountryCheck {
+  color: #4CAF50;
+  font-weight: 700;
+  margin-right: 0.35em;
+}
+
+/* Got it: phone sheet only (the <=1100px block shows it). The button is
+   EndBanner's .playAgain recipe, full width. */
+.daily-meta-card__gotit { display: none; }
+.daily-meta-card__gotit button {
+  width: 100%;
+  padding: 13px;
+  font-family: lexend;
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, var(--primary) 0%, #2e7042 100%);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+.daily-meta-card__gotit button:active { transform: scale(0.99); opacity: 0.9; }
+
+/* Hover-expand: desktop + real pointer only. A touch panel that reports a
+   fine pointer has no hover to leave, so the class can stick — same gate as
+   #miniMapArea.mapExpanded. `.expanded` grows the card; the type and the
+   pano scale with it (cqw, see the card rule), so this is a zoom, not a
+   re-flow, and no text appears that was not there at rest. About 1.5x:
+   enough to read the pano detail, not a poster. */
+@media (min-width: 1101px) and (pointer: fine) {
+  .daily-meta-card.expanded {
+    width: min(clamp(460px, 40vw, 660px), calc((100vh - 240px) * 1.6), calc(100vw - 32px));
+  }
+}
+
+/* <=1100px: a SHEET over the banner (owner, Sep 3: the corner card and the
+   banner fought for the bottom of a phone and both came out squished; then:
+   not full width, deliberate height, and the banner stays visible behind
+   it). It slides up with the reveal in front of #endBanner, which keeps
+   rendering behind it (no hiding), and Got it slides it away. Same flow as
+   the phone app (mobile DailyMetaSheet.tsx). Absolute against .endCards
+   (position: fixed, full width); the bottom offset matches the banner's own
+   10px margin so the two share a baseline.
+   Size on a 390x844 phone: 80vw = 312px wide, left-pinned; pano 16:10
+   (195px; a 16:9 box at 20vh read as zoomed in) capped at 25vh + text ~95px
+   + button ~55px = about 345px, 41% of the screen; the answer pins and the
+   banner's right side stay in view. */
+@media (max-width: 1100px) {
+  .daily-meta-card {
+    /* Left-aligned like the desktop card: centred read as an ad and hid the
+       banner. The banner's right side stays visible beside it. */
+    left: max(env(safe-area-inset-left), 12px);
+    right: auto;
+    bottom: calc(env(safe-area-inset-bottom) + 10px);
+    margin: 0;
+    width: min(80vw, 420px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    /* Opaque: the banner sits right behind, and glass would ghost its text
+       through. The daily's solid card green. */
+    background-color: #0c1f12;
+    transition: none;
+    animation: metaSheetEnter 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) 0.35s backwards;
+  }
+  .daily-meta-card.leaving {
+    transform: translateY(110%);
+    opacity: 0;
+    transition: transform 0.22s ease-in, opacity 0.22s ease-in;
+  }
+  .daily-meta-card__pano {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    max-height: 25vh;
+  }
+  .daily-meta-card__text {
+    /* No hover here: fixed type, the em ladder resolves against it. */
+    font-size: 0.9rem;
+    gap: 0.2em;
+    padding: 10px 14px 2px;
+  }
+  .daily-meta-card__gotit {
+    display: block;
+    padding: 10px 14px 12px;
+  }
+  .daily-meta-card__gotit button { padding: 11px; }
+}
+@keyframes metaSheetEnter {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Landscape phones: no vertical room for a picture — the sheet keeps its
+   text and button, drops the pano. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .daily-meta-card__pano { display: none; }
+  .daily-meta-card__text { font-size: 0.85rem; padding: 8px 14px 2px; }
+  .daily-meta-card__gotit { padding: 6px 14px 4px; }
+  .daily-meta-card__gotit button { padding: 8px; font-size: 0.9rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daily-meta-card,
+  .daily-meta-card__text,
+  .daily-meta-card__body,
+  .daily-meta-card__pano.ready {
+    transition: none;
+    animation: none;
+  }
+}

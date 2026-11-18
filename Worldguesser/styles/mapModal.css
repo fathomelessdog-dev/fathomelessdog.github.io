@@ -1,0 +1,1596 @@
+/* Maps Page Styles */
+
+/* THESE THREE ARE THE STOCK GREEN AND NOTHING ELSE READS THEM. They stay
+   literal here for the same reason :root's --r/--g/--b do (styles/globals.scss):
+   a value declared on :root is resolved on :root, so pointing them at
+   var(--primary) HERE would just bake in the green --primary happens to be at
+   the root and no accent would ever reach them. The accent override is the
+   scoped block directly below, and that is the only place these three change.
+
+   --map-primary-dark is GONE, not ported: it had zero references. */
+:root {
+  --map-primary: #245734;
+  --map-primary-light: #3a7a52;
+  --map-bg-overlay: rgba(36, 87, 52, 0.05);
+  --map-card-bg: rgba(0, 0, 0, 0.3);
+  --map-card-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --map-border-radius: 8px;
+  --map-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --map-animation-duration: 0.25s;
+}
+
+/* THE MAPS PALETTE IS THE SITE PALETTE, ONE INDIRECTION LATER.
+ *
+ * This file shipped with its own green (#245734 / #3a7a52) hand-matched to the
+ * site's, which meant the maps page was the one surface that could not follow an
+ * equipped background: 23 rules read var(--map-primary*) and every one of them
+ * bottomed out at a literal.
+ *
+ * Both selectors are in the accent scope in styles/globals.scss, so --primary
+ * and --primaryLight are ALREADY the equipped background's tones by the time
+ * these three resolve — and with nothing equipped they are the green above,
+ * verbatim. Not one of the 23 consumers changes. */
+.map-modal-content,
+.maps-page {
+  --map-primary: var(--primary);
+  --map-primary-light: var(--primaryLight);
+  --map-bg-overlay: rgba(var(--surfChannels), 0.05);
+}
+
+/* Fullscreen map modal — open/close on the actual react-responsive-modal dialog node */
+@keyframes mapModalShellIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mapModalShellOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+@keyframes mapModalOverlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mapModalOverlayOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Match library animation name + duration; easing complements the keyframes above */
+.g2_modal.map-modal-full.react-responsive-modal-modal {
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.map-modal-full-container.react-responsive-modal-container {
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  text-align: left !important;
+}
+
+/* Loading States */
+.maps-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.maps-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top: 3px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.maps-loading-text {
+  color: white;
+  font-size: 1.1rem;
+  opacity: 0.8;
+}
+
+/* Map View Container
+   NOTE: previously used backdrop-filter: blur(50px) which was the primary cause
+   of GPU jank and white-flicker artifacts on low-end devices (Chromebooks).
+   A 50px blur over a tall scrollable region forces the compositor to re-sample
+   a huge underlying area on every paint, scroll, focus or layout change. We
+   replicate the frosted-depth feel here with a layered gradient + inset
+   highlight that costs essentially nothing on the GPU. */
+.mapView {
+  max-width: min(1400px, calc(100% - 32px));
+  margin: 16px auto;
+  padding: 0 20px 100px;
+  background:
+    linear-gradient(180deg, rgba(8, 18, 12, 0.78) 0%, rgba(5, 12, 8, 0.82) 100%),
+    linear-gradient(135deg, rgba(var(--surfChannels), 0.12) 0%, rgba(0, 0, 0, 0) 60%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--map-border-radius);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  -webkit-overflow-scrolling: touch;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+/* Sticky Header
+   Was backdrop-filter: blur(20px) — re-blurred on every scroll which is the
+   worst possible time for the user to perceive jank. Solid gradient + soft
+   bottom shadow gives the same "floating header" depth without the GPU cost. */
+.map-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: linear-gradient(180deg, rgba(15, 30, 20, 0.96) 0%, rgba(15, 30, 20, 0.92) 100%);
+  padding: 20px 0 10px;
+  margin: 0 -20px 20px;
+  padding-left: 20px;
+  padding-right: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  border-top-left-radius: var(--map-border-radius);
+  border-top-right-radius: var(--map-border-radius);
+}
+
+/* Header Section */
+.map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.map-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.map-back-btn {
+  padding: 12px 24px;
+  background: rgba(220, 53, 69, 0.9);
+  color: white;
+  border: none;
+  border-radius: var(--map-border-radius);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--map-transition);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-back-btn:hover {
+  background: rgba(220, 53, 69, 1);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+}
+
+.map-title {
+  font-size: 2.5rem;
+  font-weight: 600;
+  color: white;
+  margin: 0;
+}
+
+.map-create-btn {
+  padding: 12px 24px;
+  background: linear-gradient(135deg, var(--map-primary) 0%, var(--map-primary-light) 100%);
+  color: white;
+  border: none;
+  border-radius: var(--map-border-radius);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--map-transition);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-create-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(var(--surfChannels), 0.3);
+}
+
+/* Search Section */
+.map-search-section {
+  margin-bottom: 16px;
+}
+
+.map-search-container {
+  position: relative;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* The compound `.map-search-section .map-search-input` selector outranks the
+   unscoped `input[type="text"]` rule in styles/multiPlayerModal.css (specificity
+   0,1,1) which otherwise wins and forces padding:10px / margin:10px onto this
+   input — that's what was causing the search icon to overlap the placeholder. */
+.map-search-section .map-search-input {
+  width: 100%;
+  padding: 12px 24px 12px 56px;
+  margin: 0;
+  font-size: 1.1rem;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #333;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+}
+
+.map-search-input:focus {
+  outline: none;
+  border-color: var(--map-primary);
+  box-shadow: 0 0 0 3px rgba(var(--surfChannels), 0.2);
+}
+
+.map-search-icon {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #666;
+  pointer-events: none;
+}
+
+/* Game Options */
+.map-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 24px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--map-border-radius);
+}
+
+.map-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+  font-size: 1rem;
+}
+
+.map-option input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--map-primary);
+}
+
+/* Street view mode dropdown (Moving / No Move / NMPZ) — native member of
+   the map-options row: dark field, map-primary border, real size. The
+   settings-page .g2_input it replaced was a small white pill that read as
+   a foreign object on this dark surface. */
+.map-option-mode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: white;
+  font-size: 1rem;
+}
+
+.sv-mode-select {
+  font-family: lexend, sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  background-color: rgba(0, 0, 0, 0.35);
+  border: 1.4px solid var(--map-primary);
+  border-radius: 10px;
+  padding: 8px 36px 8px 14px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  /* inline chevron: the native arrow is invisible on a dark field */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+.sv-mode-select:hover,
+.sv-mode-select:focus {
+  border-color: white;
+}
+
+/* The popup list renders on the OS sheet — keep it legible on both themes */
+.sv-mode-select option {
+  background: #14411a;
+  color: white;
+}
+
+.map-option-timer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+  font-size: 1rem;
+  flex-basis: 100%;
+  justify-content: center;
+}
+
+/* Timer checkbox — same family as .sv-mode-select: dark field, map-primary
+   border, real size. The 18px accent-color native box read as a stray dot
+   next to the styled dropdown. */
+.map-option-timer input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  border: 1.4px solid var(--map-primary);
+  border-radius: 7px;
+  background-color: rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.map-option-timer input[type="checkbox"]:hover {
+  border-color: white;
+}
+
+.map-option-timer input[type="checkbox"]:checked {
+  background-color: var(--map-primary);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='11' viewBox='0 0 13 11'><path d='M1.5 5.5l3.5 3.5L11.5 1.5' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.timer-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timer-slider input[type="range"] {
+  width: 120px;
+  accent-color: var(--map-primary);
+  cursor: pointer;
+}
+
+.timer-slider-value {
+  min-width: 40px;
+  text-align: center;
+  font-weight: 600;
+  color: white;
+}
+
+/* Category Pills Navigation */
+.map-category-pills {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-width: none;
+  justify-content: center;
+}
+
+.map-category-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.map-category-pill {
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--map-transition);
+}
+
+.map-category-pill:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* All Countries Option (legacy) */
+.all-countries-tile {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 32px;
+}
+
+/* Singleplayer Mode Tiles (World, Country Guesser, Continent Guesser) */
+.singleplayer-mode-tiles {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  margin-top: 32px;
+  flex-wrap: wrap;
+}
+
+.singleplayer-mode-tiles .map-tile {
+  width: 240px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 800px) {
+  .singleplayer-mode-tiles {
+    gap: 10px;
+  }
+  .singleplayer-mode-tiles .map-tile {
+    width: 180px;
+  }
+}
+
+@media (max-width: 500px) {
+  .singleplayer-mode-tiles .map-tile {
+    width: 150px;
+  }
+}
+
+/* Map Sections
+   content-visibility: auto lets the browser skip layout/paint for any
+   section that isn't near the viewport. contain-intrinsic-size reserves
+   space so the scrollbar doesn't jump. This is the single biggest reason
+   the page feels "soft" on Chromebooks — only visible sections cost work. */
+.map-section {
+  margin-bottom: 40px;
+  content-visibility: auto;
+  /* `auto` makes the browser remember each section's real size after first
+     paint, so scrollIntoView from the category pills lands accurately even
+     after a section has been recycled out of the viewport. */
+  contain-intrinsic-size: auto 360px;
+}
+
+.map-section-title {
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: white;
+  margin-bottom: 16px;
+  padding-left: 16px;
+  position: relative;
+}
+
+.map-section-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 24px;
+  background: linear-gradient(135deg, var(--map-primary), var(--map-primary-light));
+  border-radius: 2px;
+}
+
+/* Spotlight section — purple accent */
+.map-section--spotlight .map-section-title {
+  color: #d6b3ff;
+}
+.map-section--spotlight .map-section-title::before {
+  background: linear-gradient(135deg, #7e3ff2, #b57bff);
+}
+.map-section--spotlight .map-tile {
+  border-color: rgba(157, 96, 255, 0.35);
+  background: linear-gradient(135deg, rgba(126, 63, 242, 0.22) 0%, rgba(75, 0, 130, 0.28) 100%);
+}
+.map-section--spotlight .map-tile::before {
+  background: linear-gradient(135deg, rgba(126, 63, 242, 0.18) 0%, rgba(75, 0, 130, 0.1) 100%);
+}
+.map-section--spotlight .map-tile:hover {
+  border-color: #b57bff;
+}
+
+/* Popular section — subtle golden accent */
+.map-section--popular .map-section-title {
+  color: #ffe7a8;
+}
+.map-section--popular .map-section-title::before {
+  background: linear-gradient(135deg, #d4a000, #ffd76a);
+}
+.map-section--popular .map-tile {
+  border-color: rgba(255, 200, 90, 0.28);
+  background: linear-gradient(135deg, rgba(212, 160, 0, 0.14) 0%, rgba(120, 85, 0, 0.18) 100%);
+}
+.map-section--popular .map-tile::before {
+  background: linear-gradient(135deg, rgba(255, 200, 90, 0.12) 0%, rgba(140, 95, 0, 0.06) 100%);
+}
+.map-section--popular .map-tile:hover {
+  border-color: #ffd76a;
+}
+
+/* Map Grid */
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+  padding: 0;
+}
+
+.map-grid.country-maps {
+  grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
+  gap: 12px;
+}
+
+/* Show More/Less Button */
+.show-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 16px 24px;
+  margin-top: 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.25s ease, border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.show-more-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transition: left 0.5s ease;
+}
+
+.show-more-btn:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.08) 100%);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+}
+
+.show-more-btn:hover::before {
+  left: 100%;
+}
+
+.show-more-btn:active {
+  transform: translateY(0);
+}
+
+.map-section-container {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  border: none;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Map Tiles - Split Layout
+   Was backdrop-filter: blur(20px) PER TILE plus a transform-scale fadeIn —
+   meaning expanding a section that mounts ~100 new tiles created ~100 fresh
+   GPU compositing layers each demanding a backdrop re-sample, while the
+   scale animation simultaneously triggered paint work. That's the cause of
+   the expansion lag.
+   Replacement: a subtle 2-stop gradient (green tint top-left → black) with
+   an inset top highlight to fake the "lit-from-above glass card" depth, and
+   an opacity-only fadeIn on a translateY (transform-only, GPU-cheap). */
+.map-tile {
+  /* Tile-level containment on top of the section-level one above: an
+     EXPANDED section (up to 100 tiles) is itself near the viewport, so its
+     below-the-fold tiles still cost layout/paint without this. `auto`
+     remembers the real size after first paint, so the estimate only guides
+     the initial scrollbar. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
+  background: linear-gradient(135deg, rgba(var(--surfChannels), 0.20) 0%, rgba(0, 0, 0, 0.58) 100%);
+  border-radius: var(--map-border-radius);
+  cursor: pointer;
+  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow:
+    var(--map-card-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  color: white;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .map-tile {
+    animation: tileFadeIn var(--map-animation-duration) cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+
+@keyframes tileFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.map-tile-image,
+.map-tile-content {
+  position: relative;
+  z-index: 1;
+}
+
+.map-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--map-primary-light);
+  background: rgba(20, 36, 25, 0.92);
+}
+
+.map-tile-image {
+  width: 100%;
+  aspect-ratio: 21 / 9;
+  background-color: rgba(255, 255, 255, 0.04);
+  position: relative;
+  overflow: hidden;
+}
+
+.map-tile.country .map-tile-image {
+  aspect-ratio: 16 / 9;
+}
+
+/* Real <img> inside the tile — browser handles loading="lazy" + async
+   decode so offscreen tiles cost nothing. The opacity transition is the
+   "beautiful" entrance: an image gracefully fades in once decoded. */
+.map-tile-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.map-tile-image img.loaded {
+  opacity: 1;
+}
+
+.map-tile-content {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+}
+
+.map-tile.country .map-tile-content {
+  padding: 8px 12px;
+}
+
+/* Map Tile Header */
+.map-tile__top-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 6px;
+  flex-grow: 1;
+}
+
+.map-tile__name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.map-tile__name h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: white;
+  margin: 0;
+  line-height: 1.3;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+.map-tile.country .map-tile__name h3 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.map-tile__bottom-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.map-tile__author {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.2;
+  flex-grow: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* Location count — always visible, never shrinks. */
+.map-tile__author .map-tile__locations {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Username — shrinks and ellipses before the location count is touched.
+   The `overflow: hidden; text-overflow: ellipsis` pair that used to live here
+   is gone, for the reason it left .account-modal-title: this element is
+   `display: inline-flex`, so the ellipsis has never fired (text-overflow needs
+   a block container), and all the overflow did was shear the creator's equipped
+   name glow flush with the letterforms. The truncation moved onto the name's
+   own span in mapTile.js as the shared .wg-name-clip recipe, where the ellipsis
+   is real and the clip edge sits 34px out. */
+.map-tile__author .map-tile__username {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* Map Tile Actions */
+.map-tile__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.map-tile__heart {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  background: rgba(110, 20, 30, 0.65);
+  border: 1px solid rgba(220, 53, 69, 0.55);
+  border-radius: 8px;
+  color: #ff6b7a;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--map-transition);
+  white-space: nowrap;
+  justify-content: center;
+}
+
+.map-tile__heart:hover:not(.disabled) {
+  background: rgba(130, 25, 35, 0.8);
+  transform: scale(1.05);
+}
+
+.map-tile__heart.disabled {
+  cursor: not-allowed;
+}
+
+.map-tile__heart.hearted {
+  background: rgba(220, 53, 69, 0.9);
+  color: white;
+}
+
+.map-tile__controls {
+  display: flex;
+  gap: 4px;
+}
+
+.map-tile__edit,
+.map-tile__delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  transition: var(--map-transition);
+}
+
+.map-tile__edit {
+  background: rgba(108, 117, 125, 0.2);
+  color: #adb5bd;
+}
+
+.map-tile__edit:hover {
+  background: rgba(108, 117, 125, 0.3);
+  transform: scale(1.1);
+}
+
+.map-tile__delete {
+  background: rgba(220, 53, 69, 0.2);
+  color: #dc3545;
+}
+
+.map-tile__delete:hover {
+  background: rgba(220, 53, 69, 0.3);
+  transform: scale(1.1);
+}
+
+/* Map Tile Status */
+.map-tile__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.map-tile__status.rejected {
+  background: rgba(220, 53, 69, 0.8);
+  color: white;
+  border: 1px solid rgba(220, 53, 69, 1);
+}
+
+.map-tile__status.in-review {
+  background: rgba(255, 193, 7, 0.8);
+  color: #000;
+  border: 1px solid rgba(255, 193, 7, 1);
+}
+
+/* Review Options */
+.map-tile__review-options {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  flex-wrap: wrap;
+}
+
+.map-tile__review-options button {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--map-transition);
+  min-height: 40px;
+}
+
+.map-tile__review-options .accept {
+  background: rgba(40, 167, 69, 0.9);
+  color: white;
+}
+
+.map-tile__review-options .accept:hover {
+  background: rgba(40, 167, 69, 1);
+}
+
+.map-tile__review-options .reject {
+  background: rgba(220, 53, 69, 0.9);
+  color: white;
+}
+
+.map-tile__review-options .reject:hover {
+  background: rgba(220, 53, 69, 1);
+}
+
+.map-tile__review-options label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Reject Reason */
+.map-tile__reject-reason {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(220, 53, 69, 0.15);
+  border-left: 2px solid #dc3545;
+  border-radius: 0 4px 4px 0;
+  font-size: 0.8rem;
+  color: #ff6b7a;
+  line-height: 1.3;
+}
+
+/* No Results */
+.no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.no-results-icon {
+  font-size: 4rem;
+  color: rgba(255, 255, 255, 0.3);
+  margin-bottom: 16px;
+}
+
+.no-results-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: white;
+  margin-bottom: 8px;
+}
+
+.no-results-text {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.7);
+  max-width: 400px;
+}
+
+/* Highlight Match */
+.highlight-match {
+  background: linear-gradient(120deg, #f39c12, #e67e22);
+  color: white;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .mapView {
+    padding: 0 16px 80px;
+  }
+
+  .map-sticky-header {
+    padding: 16px 0 8px;
+    margin: -16px -16px 16px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .map-header {
+    flex-direction: column;
+    gap: 16px;
+    align-items: stretch;
+  }
+
+  .map-header-left {
+    justify-content: space-between;
+  }
+
+  .map-title {
+    font-size: 2rem;
+  }
+
+  .map-options {
+    flex-direction: column;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .map-section-title {
+    font-size: 1.4rem;
+    padding-left: 12px;
+  }
+
+  .map-section-container {
+    padding: 16px;
+  }
+
+  .map-category-pills {
+    justify-content: flex-start;
+  }
+
+  .map-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+
+  .map-grid.country-maps {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px;
+  }
+
+  .map-search-section .map-search-input {
+    padding: 14px 20px 14px 48px;
+    font-size: 1rem;
+  }
+
+  .map-search-icon {
+    left: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .mapView {
+    padding: 0 12px 60px;
+  }
+
+  .map-sticky-header {
+    padding: 12px 0 8px;
+    margin: -12px -12px 12px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .map-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+  }
+
+  .map-grid.country-maps {
+    grid-template-columns: repeat(auto-fill, minmax(95px, 1fr));
+    gap: 8px;
+  }
+
+  .map-tile-content {
+    padding: 8px;
+  }
+
+  .map-tile.country .map-tile-content {
+    padding: 6px 8px;
+  }
+
+  .map-tile__name h3 {
+    font-size: 0.85rem;
+  }
+
+  .map-tile__actions {
+    gap: 4px;
+  }
+
+  .map-tile__heart {
+    padding: 2px 5px;
+    font-size: 0.7rem;
+  }
+
+  .map-back-btn,
+  .map-create-btn {
+    padding: 10px 16px;
+    font-size: 0.9rem;
+  }
+}
+
+/* Make Map Form - Complete Redesign
+   Removed backdrop-filter: blur(20px) — the form's bg is already 92% opaque
+   so the blur was perceptually invisible but still allocated a compositing
+   layer. The visual is unchanged. */
+.make-map-form {
+  max-width: 800px;
+  margin: 0 auto 24px;
+  padding: 32px;
+  background: rgba(15, 15, 15, 0.92);
+  color: white;
+  border-radius: 16px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  animation: fadeIn var(--map-animation-duration) ease-out;
+}
+
+.make-map-form h2 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: white;
+  margin: 0 0 16px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--map-primary);
+  position: relative;
+}
+
+.make-map-form h2::before {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--map-primary), var(--map-primary-light));
+}
+
+.make-map-form h3 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: white;
+  margin: 20px 0 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.make-map-form h3::before {
+  content: '';
+  width: 4px;
+  height: 20px;
+  background: linear-gradient(135deg, var(--map-primary), var(--map-primary-light));
+  border-radius: 2px;
+}
+
+/* Rules Section - Fixed spacing and bullets */
+.make-map-form li {
+  color: rgba(255, 255, 255, 0.9);
+  margin: 4px 0;
+  padding: 4px 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  list-style: none;
+  position: relative;
+  padding-left: 16px;
+}
+
+.make-map-form li:not([style*="listStyleType"]) {
+  padding-left: 16px;
+}
+
+.make-map-form li:not([style*="listStyleType"])::before {
+  content: '•';
+  color: var(--map-primary);
+  font-weight: bold;
+  position: absolute;
+  left: 0;
+  top: 4px;
+}
+
+/* Remove default list styling */
+.make-map-form ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* Form Labels and Inputs */
+.make-map-form label {
+  display: block;
+  margin-bottom: 20px;
+  color: white;
+  font-weight: 500;
+}
+
+.make-map-form label > div {
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.make-map-form input[type="text"],
+.make-map-form textarea {
+  width: 100%;
+  padding: 16px 20px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  font-size: 1rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 50px;
+}
+
+.make-map-form textarea {
+  min-height: 120px;
+  line-height: 1.5;
+}
+
+.make-map-form input::placeholder,
+.make-map-form textarea::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.make-map-form input:focus,
+.make-map-form textarea:focus {
+  outline: none;
+  border-color: var(--map-primary);
+  box-shadow: 0 0 0 3px rgba(var(--surfChannels), 0.2);
+  background: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+/* Character Count Indicators */
+.make-map-form span[style*="color"] {
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* URL Input Container */
+.url-input-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transition: var(--map-transition);
+}
+
+.url-input-container:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.url-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  transition: var(--map-transition);
+  min-width: 0;
+}
+
+.url-input:focus {
+  outline: none;
+  border-color: var(--map-primary);
+  box-shadow: 0 0 0 2px rgba(var(--surfChannels), 0.15);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.delete-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: rgba(220, 53, 69, 0.2);
+  color: #ff6b7a;
+  border: 1px solid rgba(220, 53, 69, 0.4);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: var(--map-transition);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.delete-button:hover {
+  background: rgba(220, 53, 69, 0.3);
+  border-color: rgba(220, 53, 69, 0.6);
+  transform: scale(1.05);
+}
+
+.validation-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Location Counter and Copy Button */
+.make-map-form > div[style*="alignItems"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.make-map-form button[style*="padding:3px"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: var(--map-transition);
+  margin: 0;
+  padding: 0;
+}
+
+.make-map-form button[style*="padding:3px"]:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: scale(1.05);
+}
+
+/* Instruction Lists */
+.make-map-form span li {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9rem;
+  margin: 3px 0;
+  padding: 2px 0;
+}
+
+/* Add Button */
+.add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 24px;
+  background: linear-gradient(135deg, var(--map-primary) 0%, var(--map-primary-light) 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--map-transition);
+  text-decoration: none;
+  min-height: 48px;
+}
+
+.add-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(var(--surfChannels), 0.3);
+}
+
+.add-button:active {
+  transform: translateY(0);
+}
+
+/* File Upload Button */
+.add-button.button {
+  background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+  margin-top: 12px;
+}
+
+.add-button.button:hover {
+  box-shadow: 0 6px 20px rgba(108, 117, 125, 0.3);
+}
+
+/* Submit Button */
+.make-map-form button[type="submit"],
+.make-map-form button[disabled] {
+  width: 100%;
+  padding: 18px 32px;
+  background: linear-gradient(135deg, var(--map-primary) 0%, var(--map-primary-light) 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--map-transition);
+  margin-top: 24px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.make-map-form button[type="submit"]:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(var(--surfChannels), 0.4);
+}
+
+.make-map-form button:disabled {
+  background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  opacity: 0.7;
+}
+
+/* Clear Upload Button */
+.make-map-form button:not([type]):not([style]):not(.add-button) {
+  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-top: 12px;
+}
+
+.make-map-form button:not([type]):not([style]):not(.add-button):hover {
+  box-shadow: 0 6px 20px rgba(220, 53, 69, 0.3);
+}
+
+/* Upload Success State */
+.make-map-form > div:has(button:contains("Clear Upload")) {
+  padding: 20px;
+  background: rgba(40, 167, 69, 0.15);
+  border: 1px solid rgba(40, 167, 69, 0.3);
+  border-radius: 12px;
+  margin-top: 16px;
+}
+
+/* Links */
+.make-map-form a {
+  color: #5bc0de;
+  text-decoration: none;
+  font-weight: 500;
+  transition: var(--map-transition);
+}
+
+.make-map-form a:hover {
+  color: #31b0d5;
+  text-decoration: underline;
+}
+
+/* Status Indicators */
+.make-map-form span[style*="color: red"] {
+  background: rgba(220, 53, 69, 0.2) !important;
+  color: #ff6b7a !important;
+}
+
+.make-map-form span[style*="color: green"] {
+  background: rgba(40, 167, 69, 0.2) !important;
+  color: #51cf66 !important;
+}
+
+/* iOS Safari specific fixes */
+@supports (-webkit-touch-callout: none) {
+  .mapView {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .map-section-container {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Prevent iOS zoom on input focus */
+  .map-search-section .map-search-input {
+    font-size: 16px;
+  }
+
+  .url-input {
+    font-size: 16px;
+  }
+
+  .make-map-form input[type="text"],
+  .make-map-form textarea {
+    font-size: 16px;
+  }
+}
+
+/* Respect reduced-motion: kill the image fade and the hover lift. */
+@media (prefers-reduced-motion: reduce) {
+  .map-tile-image img {
+    transition: none;
+    opacity: 1;
+  }
+  .map-tile,
+  .map-tile:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Hide map modal sidebar on short screens */
+@media (max-height: 600px) {
+  .g2_nav_ui.map-modal-sidebar {
+    display: none !important;
+  }
+
+  /* Adjust content to take full width when sidebar is hidden */
+  .g2_content.map-modal-content {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+}
+
+/* /maps only (not the modal): the grid fills in after its fetch, and the
+   country panel below it is in the first paint. Holding the grid at one
+   viewport tall keeps that panel below the fold while the grid loads, so
+   its later move is never a scored layout shift. */
+.maps-page .mapView {
+  min-height: calc(100svh - 72px);
+}
+
+/* /maps: the official country maps under the grid (pages/maps.js). A second
+   panel of the same family as .mapView (same surface, width and radius),
+   with the same section title, and a flag + name grid inside. Plain <a>
+   links on purpose: this is the crawlable path to every country page. */
+.maps-country-links {
+  max-width: min(1400px, calc(100% - 32px));
+  margin: 0 auto 40px;
+  padding: 24px 20px 28px;
+  background:
+    linear-gradient(180deg, rgba(8, 18, 12, 0.78) 0%, rgba(5, 12, 8, 0.82) 100%),
+    linear-gradient(135deg, rgba(var(--surfChannels), 0.12) 0%, rgba(0, 0, 0, 0) 60%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--map-border-radius);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+.maps-country-links ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 4px 8px;
+}
+.maps-country-links a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--map-border-radius);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: background-color 0.2s, color 0.2s;
+}
+.maps-country-links a:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+.maps-country-links img {
+  width: 24px;
+  height: 18px;
+  object-fit: cover;
+  border-radius: 2px;
+  flex: none;
+}
+@media (max-width: 480px) {
+  .maps-country-links {
+    padding: 16px 12px 20px;
+  }
+  .maps-country-links ul {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
