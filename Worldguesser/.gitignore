@@ -1,0 +1,111 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+node_modules/
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/.next-*/
+/out/
+
+# windows: sass output accidentally redirected to the NUL device creates real files
+NUL
+nul.map
+# ...and %TEMP% is cmd.exe syntax PowerShell never expands, so it lands as a real dir
+%TEMP%/
+
+# production
+/build
+*.heapsnapshot
+
+# misc
+.DS_Store
+*.pem
+
+# world-extra ships only as data/world-extra.json.gz (raw is ~315MB, over
+# GitHub's 100MB cap); the raw file is a local regeneration intermediate
+data/world-extra.json
+# Daily answers are private runtime inputs, never repository assets.
+/Week_*.json
+/private-daily/
+# Local scratch: traces, probes, PDFs. Never repository assets.
+/tmp/
+tmpclaude*
+logs
+
+#visual studio
+.vs
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+.env
+public/wiki
+
+/scripts/*.json
+/.claude
+vali-data/*
+mapgens/*.txt
+mapgens/*-locations.json
+mapgens/*/*-locations.json
+mapgens/*/*.txt
+# Partytown (generated from node_modules)
+public/~partytown/
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/ios/
+mobile/android/
+.codex
+
+android/*
+ios/*
+
+# iOS crash / diagnostic logs
+ios-crashes/
+
+# generated build artifacts
+# NOTE: mobile/src/generated/embedHtml.ts is intentionally NOT ignored. It is a
+# committed, self-contained bundle that the mobile WebView maps import. EAS Build
+# strips ANY path matching .gitignore from the upload (even committed files), so
+# ignoring this directory breaks the iOS/Android bundle step.
+embed/node_modules/
+
+# Platform submission builds (Poki/CMG zips + exports) — generated, never commit
+builds-submission/
+
+# Impeccable skill install (local tooling; .claude copy already covered by /.claude)
+.github/skills/impeccable/
+.github/agents/impeccable-*.agent.md
+.github/hooks/impeccable.json
+
+ELO_DEPLOYMENT_AUDIT.md
+
+.agents/
+
+data/season0-peaks.json
+# fixHeadings.js resume state (see scripts/fixHeadings.js)
+*.headings.progress.json
+# pruneInvalidLocations.js audit sidecars
+*.deleted.json
+target/
+.scratch-compare/
+research/
