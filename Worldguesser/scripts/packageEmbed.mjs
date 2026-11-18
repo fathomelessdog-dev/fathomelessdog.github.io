@@ -1,0 +1,353 @@
+import { deflateRawSync } from 'node:zlib';
+import {
+    cp,
+    mkdir,
+    readFile,
+    readdir,
+    rename,
+    rm,
+    stat,
+    writeFile,
+} from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// One packager for every portal that takes a zip upload served from a nested
+// CDN path (Poki: <sub>.gdn.poki.com/<uuid>/, GD: html5.gamedistribution.com/
+// <id>/). The relative-ref rewrites below are what nested hosting requires;
+// per-portal differences are just which export dir to read and what to name
+// the zip.
+const TARGETS = {
+    // mustInline: the build-time flag this target cannot work without. Next
+    // inlines NEXT_PUBLIC_* vars that are SET at build time; an UNSET one
+    // survives in the bundle as a literal identifier read off the runtime
+    // process shim (= undefined). asset()/basePath then resolve to the CDN
+    // root and every runtime-loaded image 404s on the portal's nested path
+    // (how the July 28 GD test build shipped broken). The packager greps the
+    // chunks for the identifier and refuses to zip if it survived.
+    poki: { exportDir: '.next-poki', stagedName: 'poki', zipName: 'worldguessr-poki.zip', mustInline: 'NEXT_PUBLIC_POKI' },
+    // DuckMath is a Poki build with the ad SDK suppressed (build:duckmath sets
+    // both NEXT_PUBLIC_POKI and NEXT_PUBLIC_DUCKMATH). Same Poki-style relative
+    // assets and no bridge config. mustInline is NEXT_PUBLIC_DUCKMATH so the
+    // packager refuses to zip unless that flag was baked in — a bare/poki-only
+    // build would leave the Poki SDK loader active and ship a "duckmath" zip
+    // that still loads ads.
+    duckmath: { exportDir: '.next-duckmath', stagedName: 'duckmath', zipName: 'worldguessr-duckmath.zip', mustInline: 'NEXT_PUBLIC_DUCKMATH' },
+    // GD mounts the zip at the STABLE gameId path, so it uses a hardcoded
+    // build-time basePath (Next-native, like the CI build) instead of the
+    // runtime-derived relative-asset mode Poki needs.
+    gd: { exportDir: '.next-gd', stagedName: 'gd', zipName: 'worldguessr-gd.zip', mustInline: 'NEXT_PUBLIC_BASE_PATH' },
+    // 6x: accountless portal on schoolguessr endpoints, running the Playgama
+    // Bridge SDK for ads (Playwire is OFF here, like every other portal).
+    // Mount path unknown, so it ships Poki-style relative assets keyed on
+    // NEXT_PUBLIC_6X. bridgeConfig lands next to index.html in the zip — the
+    // SDK fetches it as ./playgama-bridge-config.json.
+    '6x': {
+        exportDir: '.next-6x', stagedName: '6x', zipName: 'worldguessr-6x.zip',
+        mustInline: 'NEXT_PUBLIC_6X',
+        bridgeConfig: 'scripts/embed-assets/6x/playgama-bridge-config.json',
+    },
+};
+const targetName = process.argv[2];
+const target = TARGETS[targetName];
+if (!target) {
+    throw new Error(`Usage: node scripts/packageEmbed.mjs <${Object.keys(TARGETS).join('|')}>`);
+}
+
+const exportDir = path.join(projectRoot, target.exportDir);
+const submissionDir = path.join(projectRoot, 'builds-submission');
+const stagedBuildDir = path.join(submissionDir, target.stagedName);
+const archivePath = path.join(submissionDir, target.zipName);
+const temporaryArchivePath = `${archivePath}.tmp`;
+
+const crcTable = new Uint32Array(256);
+for (let index = 0; index < crcTable.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+        value = (value & 1) !== 0 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    crcTable[index] = value >>> 0;
+}
+
+function crc32(buffer) {
+    let value = 0xffffffff;
+    for (const byte of buffer) {
+        value = crcTable[(value ^ byte) & 0xff] ^ (value >>> 8);
+    }
+    return (value ^ 0xffffffff) >>> 0;
+}
+
+function assertSafeOutputPath(candidate) {
+    const relative = path.relative(submissionDir, candidate);
+    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+        throw new Error(`Refusing to replace unsafe output path: ${candidate}`);
+    }
+}
+
+function toDosTimestamp(date) {
+    const year = Math.max(1980, date.getFullYear());
+    const dosTime =
+        (date.getHours() << 11) |
+        (date.getMinutes() << 5) |
+        Math.floor(date.getSeconds() / 2);
+    const dosDate = ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+    return { dosDate, dosTime };
+}
+
+// public/music-96k/ is the mobile app's low-bitrate music mirror — web builds
+// (Poki included) stream the full-quality masters from music/, so shipping the
+// mirror would add ~24MB of dead audio to the zip.
+//
+// public/backgrounds/ is the shop's purchasable site backgrounds (~13.5MB).
+// Every packager target is an accountless portal (HIDE_ACCOUNT_UI), so the
+// shop is unreachable and no session can ever carry an equipped background.
+// The DEFAULT background (street2.webp) lives at the asset root, not in here.
+//
+// public/compare/ is the screenshots for the /compare-to-* articles (~2MB).
+// Those pages are noindex on every portal build and comparePage.js renders
+// no figures there, so nothing in a portal export references these files.
+const excludedArchiveDirs = new Set(['music-96k', 'backgrounds', 'compare']);
+
+async function collectFiles(directory, prefix = '') {
+    const files = [];
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of entries) {
+        const absolutePath = path.join(directory, entry.name);
+        const archiveName = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (excludedArchiveDirs.has(archiveName)) continue;
+
+        if (entry.isDirectory()) {
+            files.push(...(await collectFiles(absolutePath, archiveName)));
+        } else if (entry.isFile()) {
+            files.push({ absolutePath, archiveName });
+        } else {
+            throw new Error(`Unsupported file type in export: ${absolutePath}`);
+        }
+    }
+
+    return files;
+}
+
+// CSS url() references resolve relative to the CSS FILE's directory, not the
+// document. Next emits font/media refs as `url(_next/static/media/...)` (or
+// `/`- or `./`-prefixed), which from `_next/static/css/` resolves to the bogus
+// `_next/static/css/_next/static/media/...` — every font and Leaflet icon
+// 404s on Poki's nested per-deploy path. Rewrite them to `../media/...`,
+// which is correct from the css/ directory at ANY hosting depth.
+async function rewriteCssMediaUrls(cssDir) {
+    const entries = await readdir(cssDir, { withFileTypes: true }).catch(() => []);
+    let rewritten = 0;
+    for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.css')) continue;
+        const cssPath = path.join(cssDir, entry.name);
+        const source = await readFile(cssPath, 'utf8');
+        const output = source.replace(
+            /url\((['"]?)(?:\.\/|\/)?_next\/static\/media\//g,
+            'url($1../media/',
+        );
+        if (output !== source) {
+            await writeFile(cssPath, output);
+            rewritten += 1;
+        }
+    }
+    return rewritten;
+}
+
+// Prerendered HTML references public assets root-absolutely (src="/loader.webp",
+// url("/street2.webp") in _document's inline styles). Under Poki's nested deploy
+// folder those resolve to the CDN root and 404. Rewrite them document-relative,
+// depth-aware ('./x' at root, '../x' one level down) — but only when the target
+// is a real exported file, so route links (href="/leaderboard") stay untouched
+// for the client router.
+async function rewriteHtmlAbsoluteRefs(stagedDir, archiveNames) {
+    let rewrittenFiles = 0;
+    for (const name of archiveNames) {
+        if (!name.endsWith('.html')) continue;
+        const depth = name.split('/').length - 1;
+        const prefix = depth === 0 ? './' : '../'.repeat(depth);
+        const htmlPath = path.join(stagedDir, name);
+        const source = await readFile(htmlPath, 'utf8');
+        const output = source.replace(
+            /((?:src|href)="|url\("|url\(')\/([^"')]+)/g,
+            (match, lead, target) => {
+                const clean = target.split(/[?#]/, 1)[0];
+                return archiveNames.has(clean) ? `${lead}${prefix}${target}` : match;
+            },
+        );
+        if (output !== source) {
+            await writeFile(htmlPath, output);
+            rewrittenFiles += 1;
+        }
+    }
+    return rewrittenFiles;
+}
+
+function validateEntryPage(entryHtml, archiveNames) {
+    const referencedNextAssets = [...entryHtml.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
+        .map((match) => match[1])
+        .filter((url) => /^(?:\.\/|\/)?_next\//.test(url))
+        .map((url) => url.replace(/^(?:\.\/|\/)/, '').split(/[?#]/, 1)[0]);
+
+    const missingAssets = referencedNextAssets.filter((asset) => !archiveNames.has(asset));
+    if (missingAssets.length > 0) {
+        throw new Error(
+            `index.html references assets missing from the archive:\n${missingAssets.join('\n')}`,
+        );
+    }
+}
+
+async function createZip(files, destination) {
+    if (files.length > 0xffff) {
+        throw new Error(`ZIP32 supports at most 65535 files; found ${files.length}`);
+    }
+
+    const localParts = [];
+    const centralParts = [];
+    let localOffset = 0;
+
+    for (const file of files) {
+        const name = Buffer.from(file.archiveName, 'utf8');
+        const data = await readFile(file.absolutePath);
+        const compressed = deflateRawSync(data, { level: 9 });
+        const useCompression = compressed.length < data.length;
+        const contents = useCompression ? compressed : data;
+        const compressionMethod = useCompression ? 8 : 0;
+        const checksum = crc32(data);
+        const fileStat = await stat(file.absolutePath);
+        const { dosDate, dosTime } = toDosTimestamp(fileStat.mtime);
+
+        if (name.length > 0xffff || data.length > 0xffffffff || contents.length > 0xffffffff) {
+            throw new Error(`File is too large for ZIP32: ${file.archiveName}`);
+        }
+
+        const localHeader = Buffer.alloc(30);
+        localHeader.writeUInt32LE(0x04034b50, 0);
+        localHeader.writeUInt16LE(20, 4);
+        localHeader.writeUInt16LE(0x0800, 6);
+        localHeader.writeUInt16LE(compressionMethod, 8);
+        localHeader.writeUInt16LE(dosTime, 10);
+        localHeader.writeUInt16LE(dosDate, 12);
+        localHeader.writeUInt32LE(checksum, 14);
+        localHeader.writeUInt32LE(contents.length, 18);
+        localHeader.writeUInt32LE(data.length, 22);
+        localHeader.writeUInt16LE(name.length, 26);
+
+        const centralHeader = Buffer.alloc(46);
+        centralHeader.writeUInt32LE(0x02014b50, 0);
+        centralHeader.writeUInt16LE((3 << 8) | 20, 4);
+        centralHeader.writeUInt16LE(20, 6);
+        centralHeader.writeUInt16LE(0x0800, 8);
+        centralHeader.writeUInt16LE(compressionMethod, 10);
+        centralHeader.writeUInt16LE(dosTime, 12);
+        centralHeader.writeUInt16LE(dosDate, 14);
+        centralHeader.writeUInt32LE(checksum, 16);
+        centralHeader.writeUInt32LE(contents.length, 20);
+        centralHeader.writeUInt32LE(data.length, 24);
+        centralHeader.writeUInt16LE(name.length, 28);
+        centralHeader.writeUInt32LE((0o100644 << 16) >>> 0, 38);
+        centralHeader.writeUInt32LE(localOffset, 42);
+
+        localParts.push(localHeader, name, contents);
+        centralParts.push(centralHeader, name);
+        localOffset += localHeader.length + name.length + contents.length;
+    }
+
+    const centralDirectory = Buffer.concat(centralParts);
+    const endRecord = Buffer.alloc(22);
+    endRecord.writeUInt32LE(0x06054b50, 0);
+    endRecord.writeUInt16LE(files.length, 8);
+    endRecord.writeUInt16LE(files.length, 10);
+    endRecord.writeUInt32LE(centralDirectory.length, 12);
+    endRecord.writeUInt32LE(localOffset, 16);
+
+    if (localOffset > 0xffffffff || centralDirectory.length > 0xffffffff) {
+        throw new Error('Build is too large for a ZIP32 archive');
+    }
+
+    await writeFile(destination, Buffer.concat([...localParts, centralDirectory, endRecord]));
+}
+
+for (const outputPath of [stagedBuildDir, archivePath, temporaryArchivePath]) {
+    assertSafeOutputPath(outputPath);
+}
+
+const exportStats = await stat(exportDir).catch(() => null);
+if (!exportStats?.isDirectory()) {
+    throw new Error(`Export not found at ${exportDir}. Run the ${targetName} Next.js build first.`);
+}
+
+await mkdir(submissionDir, { recursive: true });
+await rm(stagedBuildDir, { recursive: true, force: true });
+await rm(temporaryArchivePath, { force: true });
+await cp(exportDir, stagedBuildDir, { recursive: true });
+
+const cssDir = path.join(stagedBuildDir, '_next', 'static', 'css');
+const rewrittenCssFiles = await rewriteCssMediaUrls(cssDir);
+// Regression gate: no staged CSS may still point at _next/static/media —
+// any such ref resolves under css/ and 404s on Poki.
+for (const entry of await readdir(cssDir, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isFile() || !entry.name.endsWith('.css')) continue;
+    const contents = await readFile(path.join(cssDir, entry.name), 'utf8');
+    if (/url\((['"]?)(?:\.\/|\/)?_next\/static\/media\//.test(contents)) {
+        throw new Error(`CSS still references _next/static/media after rewrite: ${entry.name}`);
+    }
+}
+
+// Playgama bridge config that must sit NEXT TO index.html: the SDK fetches
+// ./playgama-bridge-config.json relative to the entry document, and the 6x
+// mount path is unknown, so it can only be a sibling of index.html. It
+// cannot live in public/ — that ships to EVERY build, worldguessr.com
+// included. Copied before collectFiles so it lands in the zip. JSON.parse
+// fails the build, not the submission: a typo'd config would otherwise only
+// surface as "no ads" after the portal upload.
+if (target.bridgeConfig) {
+    const source = path.join(projectRoot, target.bridgeConfig);
+    JSON.parse(await readFile(source, 'utf8'));
+    await cp(source, path.join(stagedBuildDir, 'playgama-bridge-config.json'));
+}
+
+const files = await collectFiles(stagedBuildDir);
+const archiveNames = new Set(files.map((file) => file.archiveName));
+if (!archiveNames.has('index.html')) {
+    throw new Error('Export has no root index.html');
+}
+if (![...archiveNames].some((name) => name.startsWith('_next/static/'))) {
+    throw new Error('Export has no _next/static assets');
+}
+if ([...archiveNames].some((name) => name.includes('\\'))) {
+    throw new Error('Archive paths must use forward slashes');
+}
+
+// See TARGETS.mustInline: the flag's identifier surviving in a chunk proves
+// the export was built without it set.
+for (const file of files) {
+    if (!file.archiveName.startsWith('_next/static/') || !file.archiveName.endsWith('.js')) continue;
+    const contents = await readFile(file.absolutePath, 'utf8');
+    if (contents.includes(target.mustInline)) {
+        throw new Error(
+            `${file.archiveName} still references ${target.mustInline} — this export was built ` +
+            `WITHOUT ${target.mustInline}=true and would 404 every runtime asset on the portal's ` +
+            `nested CDN path. Rebuild with "pnpm build:${targetName}", never bare "next build".`,
+        );
+    }
+}
+
+const rewrittenHtmlFiles = await rewriteHtmlAbsoluteRefs(stagedBuildDir, archiveNames);
+
+validateEntryPage(await readFile(path.join(stagedBuildDir, 'index.html'), 'utf8'), archiveNames);
+await createZip(files, temporaryArchivePath);
+await rm(archivePath, { force: true });
+await rename(temporaryArchivePath, archivePath);
+
+const archiveStats = await stat(archivePath);
+console.log(
+    `Created ${path.relative(projectRoot, archivePath)} (${files.length} files, ${(
+        archiveStats.size /
+        1024 /
+        1024
+    ).toFixed(1)} MiB) with nested-hosting-compatible asset paths (${rewrittenCssFiles} CSS + ${rewrittenHtmlFiles} HTML files rewritten to relative refs).`,
+);
