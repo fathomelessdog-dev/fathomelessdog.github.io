@@ -1,0 +1,376 @@
+/**
+ * Animated rating display for ranked duel results.
+ *
+ * Mirrors the web duel header (components/roundOverScreen.js `elo-container`):
+ * an "ELO:" label, the NEW rating counting up/down from the old value, and the
+ * delta in green/red. No old→new arrow, no parentheses, and no duplicate
+ * Victory/Defeat label — that title already sits above this in the header.
+ *
+ * RATING V2. This component used to style itself off `elo < 2000`, which was
+ * the v1 "quadruple the winner's gain" ramp. That zone NO LONGER EXISTS: v2
+ * gives each player an integer delta from that player's own K-factor. Gains
+ * and losses therefore need not match. Under the new scale the whole ladder
+ * lives roughly in 100..1800 and even the top player is ~1600 —
+ * every single player would have fallen inside the old `< 2000` branch, making
+ * the "you're in the boost zone" styling a permanent lie. It is gone. Nothing
+ * here may key off an absolute rating threshold again.
+ *
+ * Flourish is now keyed to the LEAGUE, and the league is taken from the SERVER
+ * whenever the server told us one (see resolveLeague) so a seasonal re-anchor
+ * of the cutoffs needs no store release.
+ */
+
+import { useEffect, useMemo, useState } from 'react';
+import { Platform, View, Text, StyleSheet } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useReducedMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
+import { colors } from '../../shared';
+import { t } from '../../shared/locale';
+import { getActiveLeagues, resolveLeague, type ServerLeague } from '../../shared/user/leagues';
+import { spacing, fontSizes } from '../../styles/theme';
+
+interface EloChangeDisplayProps {
+  oldElo: number;
+  newElo: number;
+  winner: boolean;
+  draw: boolean;
+  /**
+   * The league as the SERVER computed it for `newElo`. Preferred over the local
+   * cutoff table whenever present — pass `user.league` straight through.
+   */
+  serverLeague?: ServerLeague;
+  /**
+   * Placement match: this result SEEDED the rating rather than transferring it.
+   * Replaces the rating mechanics with a plain-language league result for a
+   * player's first ranked-game outcome.
+   */
+  placement?: boolean;
+}
+
+/**
+ * How much sparkle a win earns: the league's position in the ladder, 1-based.
+ * Derived from the ACTIVE table's ordering rather than hardcoded thresholds, so
+ * adding or re-anchoring a tier can never leave this branch behind.
+ */
+function getParticleCount(league: { name: string }): number {
+  const names = Object.values(getActiveLeagues()).map((l) => l.name);
+  const idx = names.indexOf(league.name);
+  // Unknown (server-only) tier => treat as mid-ladder rather than zero sparkle.
+  return idx < 0 ? 2 : Math.min(4, idx + 1);
+}
+
+export default function EloChangeDisplay({
+  oldElo,
+  newElo,
+  winner,
+  draw,
+  serverLeague,
+  placement = false,
+}: EloChangeDisplayProps) {
+  const delta = newElo - oldElo;
+  const league = useMemo(() => resolveLeague(newElo, serverLeague), [newElo, serverLeague]);
+  // Placement seeds are not a "win", so they get no victory sparkle — the
+  // rating jump is the reveal. Otherwise sparkle only on an actual gain.
+  const particleCount = !placement && delta > 0 ? getParticleCount(league) : 0;
+  const starColor = league.light ?? league.color;
+  const reduceMotion = useReducedMotion();
+
+  // Count the rating up/down from old → new (web parity: components/roundOverScreen.js).
+  //
+  // FIXED DURATION, NOT FIXED STEP SIZE — the same correction the web counter
+  // needed. The previous version derived its cadence from |Δ| (`stepMs =
+  // DURATION / steps`), which was fine when a duel moved 60-600 points but is
+  // wrong on the v2 scale: a Δ of 1 collapsed to a SINGLE 1200ms tick, i.e. the
+  // number sat still for one and a half seconds and then teleported. Now the
+  // count always takes COUNT_MS regardless of the swing.
+  //
+  // LINEAR, BY RULING (Aug 14, mirrors web): an eased two-curve version
+  // shipped briefly and was rolled back the same day — front-loading burned
+  // most of the digits in the first ~300ms and read as too fast. The steady
+  // linear count is the intended feel; do not re-introduce an easing curve
+  // here without a new ruling.
+  const [animatedElo, setAnimatedElo] = useState(oldElo);
+  useEffect(() => {
+    if (reduceMotion || oldElo === newElo) {
+      setAnimatedElo(newElo);
+      return;
+    }
+    const COUNT_MS = 1500;
+    const START_DELAY = 250; // let the result title and badge paint first
+
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let last = oldElo;
+    setAnimatedElo(oldElo);
+
+    const startTimer = setTimeout(() => {
+      const startedAt = Date.now();
+      // 33ms (30Hz), not per-frame: nobody can read digits changing faster, and
+      // every tick is a React commit on the JS thread that also drives the
+      // results screen's reanimated work.
+      interval = setInterval(() => {
+        const progress = Math.min((Date.now() - startedAt) / COUNT_MS, 1);
+        const value = progress >= 1 ? newElo : Math.round(oldElo + delta * progress);
+        // Only commit when a digit actually changes. On the v2 scale a ±3 swing
+        // is 3 commits across the whole second instead of 30.
+        if (value !== last) {
+          last = value;
+          setAnimatedElo(value);
+        }
+        if (progress >= 1 && interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      }, 33);
+    }, START_DELAY);
+
+    // Both timers cancelled: a fast rematch remounts/re-runs this with new
+    // values, and a surviving interval would keep writing the previous duel's
+    // rating over the new one.
+    return () => {
+      clearTimeout(startTimer);
+      if (interval) clearInterval(interval);
+    };
+  }, [oldElo, newElo, delta, reduceMotion]);
+
+  // Subtle pop-in on the value row.
+  const slide = useSharedValue(reduceMotion ? 1 : 0);
+  const scale = useSharedValue(reduceMotion ? 1 : placement ? 0.94 : 0.6);
+  useEffect(() => {
+    if (reduceMotion) {
+      slide.value = 1;
+      scale.value = 1;
+      return;
+    }
+    if (placement) {
+      slide.value = 0;
+      scale.value = 0.94;
+      slide.value = withDelay(100, withTiming(1, { duration: 320 }));
+      scale.value = withDelay(
+        100,
+        withTiming(1, { duration: 420, easing: Easing.out(Easing.cubic) }),
+      );
+    } else {
+      slide.value = withDelay(150, withTiming(1, { duration: 350 }));
+      scale.value = withDelay(
+        150,
+        withTiming(1, { duration: 450, easing: Easing.out(Easing.back(1.6)) }),
+      );
+    }
+    return () => {
+      cancelAnimation(slide);
+      cancelAnimation(scale);
+    };
+  }, [placement, reduceMotion, scale, slide]);
+
+  const displayStyle = useAnimatedStyle(() => ({
+    opacity: slide.value,
+    transform: [{ scale: scale.value }],
+  }));
+
+  // Colour purely by SIGN. Each result is player-specific, and there is no
+  // magnitude threshold worth reacting to.
+  const deltaColor = delta > 0 ? colors.success : delta < 0 ? colors.error : colors.textSecondary;
+  const deltaText = delta > 0 ? `+${delta}` : `${delta}`;
+
+  // A first-time player needs the outcome before the rating vocabulary. The
+  // badge keeps the league sentence and the live rating in one readable unit.
+  if (placement) {
+    return (
+      <View style={[styles.container, styles.placementContainer]}>
+        <Animated.View
+          style={[styles.placementBadge, { borderColor: starColor }, displayStyle]}
+          accessible
+          accessibilityLabel={`${t('placementLeagueResult', { league: league.name })}. ${newElo} ${t('elo')}`}
+        >
+          <Text style={styles.placementEmblem} accessible={false}>{league.emoji}</Text>
+          <View style={styles.placementBody} accessible={false}>
+            <Text style={styles.placementResult}>
+              {t('placementLeagueResult', { league: league.name })}
+            </Text>
+            <View style={styles.placementRatingRow}>
+              <Text style={[styles.placementValue, { color: starColor }]}>{animatedElo}</Text>
+              <Text style={styles.placementUnit}>{t('elo')}</Text>
+            </View>
+          </View>
+        </Animated.View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {Array.from({ length: particleCount }).map((_, index) => (
+        <StarParticle
+          key={index}
+          index={index}
+          count={particleCount}
+          color={starColor}
+        />
+      ))}
+      <Text style={styles.label}>{t('elo')}:</Text>
+      <Animated.View style={[styles.row, displayStyle]}>
+        <Text style={styles.value}>{animatedElo}</Text>
+        <Text style={[styles.delta, { color: deltaColor }]}>{deltaText}</Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+function StarParticle({
+  index,
+  count,
+  color,
+}: {
+  index: number;
+  count: number;
+  color: string;
+}) {
+  const progress = useSharedValue(0);
+  const angle = count === 1 ? 0 : -35 + (70 / Math.max(1, count - 1)) * index;
+  const distance = 34 + index * 5;
+
+  useEffect(() => {
+    progress.value = withDelay(
+      650 + index * 90,
+      withSequence(
+        withTiming(1, {
+          duration: 520,
+          easing: Easing.out(Easing.back(1.8)),
+        }),
+        withTiming(0, {
+          duration: 520,
+          easing: Easing.in(Easing.cubic),
+        }),
+      ),
+    );
+    return () => {
+      cancelAnimation(progress);
+    };
+  }, [index, progress]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const radians = (angle * Math.PI) / 180;
+    return {
+      opacity: progress.value,
+      transform: [
+        { translateX: Math.sin(radians) * distance * progress.value },
+        { translateY: -Math.cos(radians) * distance * progress.value },
+        { scale: progress.value },
+        { rotate: `${progress.value * (180 + index * 45)}deg` },
+      ],
+    };
+  });
+
+  return (
+    <Animated.Text style={[styles.starParticle, { color, textShadowColor: color }, animatedStyle]}>
+      ★
+    </Animated.Text>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    position: 'relative',
+  },
+  placementContainer: {
+    alignSelf: 'stretch',
+  },
+  placementBadge: {
+    width: '100%',
+    maxWidth: 320,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderWidth: 2,
+    borderRadius: 16,
+    backgroundColor: colors.primaryTransparent,
+    ...Platform.select({
+      ios: {
+        shadowColor: colors.black,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.35,
+        shadowRadius: 16,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  placementEmblem: {
+    flexShrink: 0,
+    fontSize: fontSizes['3xl'],
+    lineHeight: fontSizes['4xl'],
+  },
+  placementBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xs,
+  },
+  placementResult: {
+    color: colors.textSecondary,
+    fontSize: fontSizes.sm,
+    fontFamily: 'Lexend-Medium',
+    lineHeight: fontSizes.xl,
+  },
+  placementRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+  },
+  placementValue: {
+    fontSize: fontSizes['3xl'],
+    lineHeight: fontSizes['4xl'],
+    fontFamily: 'Lexend-Bold',
+    fontVariant: ['tabular-nums'],
+  },
+  placementUnit: {
+    color: colors.textMuted,
+    fontSize: fontSizes.sm,
+    fontFamily: 'Lexend-SemiBold',
+  },
+  label: {
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontSize: fontSizes.sm,
+    fontFamily: 'Lexend-SemiBold',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+  },
+  value: {
+    color: colors.white,
+    fontSize: fontSizes['3xl'],
+    fontFamily: 'Lexend-Bold',
+    // The count-up rewrites this every time a digit changes; without a fixed
+    // digit advance the row (which is centred, with the ±N chip beside it)
+    // shuffles sideways on each change. Web sets the same thing on .elo-value.
+    fontVariant: ['tabular-nums'],
+  },
+  delta: {
+    fontSize: fontSizes.xl,
+    fontFamily: 'Lexend-SemiBold',
+    fontVariant: ['tabular-nums'],
+  },
+  starParticle: {
+    position: 'absolute',
+    top: 10,
+    fontSize: 18,
+    fontFamily: 'Lexend-Bold',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+});
