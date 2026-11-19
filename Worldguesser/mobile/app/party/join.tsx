@@ -1,0 +1,226 @@
+/**
+ * Join a private game by entering a 6-digit code.
+ *
+ * Thin entry screen: it only collects the code and calls joinPrivateGame. It
+ * does NOT render a lobby or navigate to the game — home.tsx pushes the unified
+ * /game/multiplayer screen (which renders the lobby) as soon as `inGame` flips.
+ *
+ * Its X goes to the TAB ROOT, not one level back: this screen is reached from
+ * home AND from the 2v2 staging lobby's "Have a game code?" link, and in the
+ * latter case the lobby's spent create shell still sits underneath (home.tsx
+ * auto-nav explains why that shell is neither replaced nor pruned). A plain
+ * back() popped onto that dead, forever-shimmering skeleton.
+ */
+
+import { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  ScrollView,
+  Platform,
+  useWindowDimensions,
+} from 'react-native';
+import SiteBackground from '../../src/components/SiteBackground';
+import { Pressable } from '../../src/components/ui/SfxPressable';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { colors, t } from '../../src/shared';
+import { haptics } from '../../src/services/haptics';
+import { spacing, fontSizes, borderRadius } from '../../src/styles/theme';
+import { useMultiplayerStore } from '../../src/store/multiplayerStore';
+import { dismissAllSafe } from '../../src/utils/navigation';
+
+export default function PartyJoinScreen() {
+  // Landscape is height-bound: the auto-focused number pad covers most of a short
+  // viewport, so the content is made scrollable and the input/button are compacted.
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
+  const inputRef = useRef<TextInput>(null);
+  const joinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [code, setCode] = useState('');
+  const [joining, setJoining] = useState(false);
+
+  const joinPrivateGame = useMultiplayerStore((s) => s.joinPrivateGame);
+  const joinError = useMultiplayerStore((s) => s.joinError);
+  // Set when a join bounced off the server's login gate: PartyLoginGate is
+  // raising the login sheet over this screen, so the attempt is resolved even
+  // though there is deliberately no error text to show.
+  const pendingLoginJoin = useMultiplayerStore((s) => s.pendingLoginJoin);
+
+  // Auto-focus input
+  useEffect(() => {
+    const timer = setTimeout(() => inputRef.current?.focus(), 300);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Clear error when code changes
+  useEffect(() => {
+    if (joinError) {
+      useMultiplayerStore.setState({ joinError: null });
+    }
+  }, [code]);
+
+  // The attempt resolved without a game: either a plain error, or the login
+  // gate (which shows a sheet instead of an error). Re-enable the button.
+  useEffect(() => {
+    if (joinError || pendingLoginJoin) {
+      setJoining(false);
+      if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+    }
+  }, [joinError, pendingLoginJoin]);
+
+  // Clear the safety timeout on unmount (success navigates away before it fires).
+  useEffect(() => () => {
+    if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+  }, []);
+
+  const handleJoin = () => {
+    if (code.length !== 6) return;
+    haptics.medium(); // committing to join a party
+    setJoining(true);
+    joinPrivateGame(code);
+    // Safety net: if the server never answers (dropped packet / silent drop),
+    // re-enable the button instead of spinning forever.
+    if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+    joinTimeoutRef.current = setTimeout(() => setJoining(false), 5000);
+  };
+
+  return (
+    <View style={styles.container}>
+      <SiteBackground style={StyleSheet.absoluteFillObject}/>
+      <View style={styles.darkOverlay} />
+      <LinearGradient
+        colors={[
+          'rgba(20, 65, 25, 0.85)',
+          'rgba(20, 65, 25, 0.6)',
+          'rgba(0, 0, 0, 0.7)',
+        ]}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <SafeAreaView style={styles.flex} edges={['top', 'bottom', 'left', 'right']}>
+        <View style={styles.header}>
+          <Pressable onPress={() => dismissAllSafe()} style={styles.backBtn}>
+            <Ionicons name="close" size={24} color={colors.white} />
+          </Pressable>
+          <Text style={styles.headerTitle}>{t('joinGame')}</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            style={styles.flex}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.codeLabel}>{t('gameCode')}</Text>
+
+            <TextInput
+              ref={inputRef}
+              style={[styles.codeInput, isLandscape && styles.codeInputLandscape]}
+              value={code}
+              onChangeText={(text) => setCode(text.replace(/\D/g, '').slice(0, 6))}
+              keyboardType="number-pad"
+              maxLength={6}
+              placeholder="000000"
+              placeholderTextColor="rgba(255, 255, 255, 0.2)"
+              autoFocus
+            />
+
+            {joinError && <Text style={styles.errorText}>{joinError}</Text>}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.joinBtn,
+                isLandscape && styles.joinBtnLandscape,
+                code.length !== 6 && styles.joinBtnDisabled,
+                pressed && code.length === 6 && { opacity: 0.85 },
+              ]}
+              onPress={handleJoin}
+              disabled={code.length !== 6 || joining}
+            >
+              {joining ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.joinBtnText}>{t('join')}</Text>
+              )}
+            </Pressable>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0a1a0c' },
+  darkOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.6)' },
+  flex: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { color: colors.white, fontSize: fontSizes.lg, fontFamily: 'Lexend-Bold' },
+  content: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+  },
+  codeLabel: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: fontSizes.xs,
+    fontFamily: 'Lexend-SemiBold',
+    letterSpacing: 2,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+  codeInput: {
+    color: colors.white,
+    fontSize: 36,
+    fontFamily: 'Lexend-Bold',
+    letterSpacing: 8,
+    textAlign: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 16,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    width: '100%',
+    maxWidth: 300,
+  },
+  codeInputLandscape: { paddingVertical: spacing.md },
+  errorText: {
+    color: colors.error,
+    fontSize: fontSizes.sm,
+    fontFamily: 'Lexend',
+    marginTop: spacing.md,
+    textAlign: 'center',
+  },
+  joinBtn: {
+    marginTop: spacing.xl,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing['3xl'],
+    borderRadius: borderRadius.lg,
+    minWidth: 160,
+    alignItems: 'center',
+  },
+  joinBtnLandscape: { marginTop: spacing.lg },
+  joinBtnDisabled: { opacity: 0.5 },
+  joinBtnText: { color: colors.white, fontSize: fontSizes.md, fontFamily: 'Lexend-Bold' },
+});
