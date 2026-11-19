@@ -1,0 +1,383 @@
+import { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, useWindowDimensions } from 'react-native';
+import { Pressable } from '../ui/SfxPressable';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  Easing,
+} from 'react-native-reanimated';
+import { withDelay, withTiming, withRepeat, withSequence } from './anims';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { t } from '../../shared/locale';
+import { formatCountdown, msUntilLocalMidnight } from './dailyDate';
+import DailyStreakBadge from './DailyStreakBadge';
+import ScoreDistributionChart from './ScoreDistributionChart';
+import PersonalRecordsCard from './PersonalRecordsCard';
+import { derivePercentile } from '@shared/daily/percentile';
+import DailyHistoryBars14 from './DailyHistoryBars14';
+import DailyBackground from './DailyBackground';
+import DailySection from './DailySection';
+import DailyLeaderboardSheet from './DailyLeaderboardSheet';
+import { dailyColors, dailyTimings } from './styles';
+
+interface Props {
+  today: string;
+  distribution?: { totalPlays: number; avgScore: number; buckets: number[] } | null;
+  userData?: any;
+  onStartChallenge: () => void;
+  onSignIn?: () => void;
+  onClose: () => void;
+  isLoggedIn: boolean;
+  animateEntrance?: boolean;
+}
+
+function StaggerSection({ delay, children }: { delay: number; children: React.ReactNode }) {
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(24);
+  useEffect(() => {
+    opacity.value = withDelay(delay, withTiming(1, { duration: dailyTimings.landingEntrance, easing: Easing.out(Easing.cubic) }));
+    translateY.value = withDelay(delay, withTiming(0, { duration: dailyTimings.landingEntrance, easing: Easing.out(Easing.cubic) }));
+  }, []);
+  const style = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+  return <Animated.View style={style}>{children}</Animated.View>;
+}
+
+export default function DailyLanding({
+  today,
+  distribution = null,
+  userData,
+  onStartChallenge,
+  onSignIn,
+  onClose,
+  isLoggedIn,
+  animateEntrance = false,
+}: Props) {
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const [countdown, setCountdown] = useState(() => msUntilLocalMidnight());
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  useEffect(() => {
+    const id = setInterval(() => setCountdown(msUntilLocalMidnight()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Grace banner pulse (web dailyLandingGracePulse, 2.4s).
+  const gracePulse = useSharedValue(1);
+  useEffect(() => {
+    gracePulse.value = withRepeat(
+      withSequence(
+        withTiming(1.02, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      false,
+    );
+  }, []);
+  const graceStyle = useAnimatedStyle(() => ({ transform: [{ scale: gracePulse.value }] }));
+
+  const playedToday = userData?.playedToday;
+  // A DQ'd run counts as played (date locked, streak advanced) but tapping
+  // the CTA opens the "done for today" modal instead of results — swap the
+  // subtitle so it doesn't promise results. Mirrors components/daily/DailyLanding.js.
+  const disqualifiedToday = !!userData?.disqualifiedToday;
+  const graceDay = !!userData?.graceDay && !playedToday && (userData?.streak || 0) > 0;
+  const heroSize = Math.max(38, Math.min(46, Math.round(width * 0.115)));
+
+  return (
+    <View style={styles.root}>
+      <DailyBackground style={StyleSheet.absoluteFill} />
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 }]}>
+        <View style={styles.headerBar}>
+          <Pressable onPress={onClose} hitSlop={12} style={styles.backBtn}>
+            <Ionicons name="close" size={22} color="#fff" />
+          </Pressable>
+        </View>
+
+        <StaggerSection delay={0}>
+          <Text style={[styles.heroTitle, { fontSize: heroSize, lineHeight: heroSize * 1.05 }]}>
+            {t('dailyLandingTitle')}
+          </Text>
+
+          <Pressable
+            onPress={onStartChallenge}
+            style={({ pressed }) => [styles.cta, playedToday ? styles.ctaPlayed : styles.ctaDefault, pressed && styles.ctaPressed]}
+          >
+            <View style={styles.ctaTopRow}>
+              {!playedToday && <Ionicons name="play" size={15} color="#fff" style={{ marginRight: 8 }} />}
+              <Text style={styles.ctaText}>
+                {playedToday
+                  ? t('nextChallengeIn', { time: formatCountdown(countdown) })
+                  : t('openTodaysChallenge')}
+              </Text>
+            </View>
+            <Text style={[styles.ctaSubtitle, playedToday && styles.ctaSubtitlePlayed]}>
+              {playedToday
+                ? t(disqualifiedToday ? 'dailyAlreadyDisqualifiedTitle' : 'alreadyPlayedViewResults')
+                : t('nextChallengeIn', { time: formatCountdown(countdown) })}
+            </Text>
+          </Pressable>
+
+          {graceDay && (
+            <Animated.View style={[styles.graceBanner, graceStyle]}>
+              <Text style={styles.graceText}>{t('dailyLandingGraceDay', { streak: userData?.streak })}</Text>
+            </Animated.View>
+          )}
+
+          <View style={styles.userStats}>
+            {(userData?.streak || 0) > 0 && (
+              <DailyStreakBadge
+                streak={userData.streak}
+                size="lg"
+                align="center"
+                variant={graceDay ? 'at-risk' : playedToday ? 'done' : 'pulsing'}
+              />
+            )}
+            {!isLoggedIn && (
+              <View style={styles.signinPrompt}>
+                <Text style={styles.signinPromptText}>
+                  {(userData?.streak || 0) > 0
+                    ? t('dailyLandingLockInStreak', { streak: userData?.streak })
+                    : t('dailyLandingLoggedOutPrompt')}
+                </Text>
+                {onSignIn && (
+                  <Pressable onPress={onSignIn} style={styles.signinBtn}>
+                    <Text style={styles.signinBtnText}>{t('signIn')}</Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+          </View>
+        </StaggerSection>
+
+        <StaggerSection delay={80}>
+          <DailySection title={t('dailyLandingHowItWorks')} style={styles.sectionGap}>
+            <View style={styles.steps}>
+              <Step icon="calendar" text={t('dailyLandingStep1')} />
+              <Step icon="time" text={t('dailyLandingStep2')} />
+              <Step icon="trophy" text={t('dailyLandingStep3')} />
+            </View>
+          </DailySection>
+        </StaggerSection>
+
+        {/* Community pulse — the anonymous distribution stays the headline (an
+            average is a reachable target for beginners); the named top-100
+            board is deliberately tucked behind an opt-in slide-up sheet so it
+            isn't the main attraction. Mirrors web DailyLanding.js and the
+            results screen's distribution card: hook (pre-play, as a subtitle)
+            → chart (≥10 plays) → meta → standing. */}
+        <StaggerSection delay={150}>
+          {/* "How you compare" only makes sense once there's a score to compare —
+              pre-play it's just today's scores. */}
+          <DailySection
+            title={t(playedToday && !disqualifiedToday ? 'dailyScoreDistribution' : 'dailyTodaysScores')}
+            headerRight={(distribution?.totalPlays || 0) > 0 ? (
+              <Pressable onPress={() => setShowLeaderboard(true)} hitSlop={6} style={styles.leaderboardBtn}>
+                <Ionicons name="trophy" size={13} color="#ffd700" />
+                <Text style={styles.leaderboardBtnText}>{t('dailyViewLeaderboard')}</Text>
+              </Pressable>
+            ) : undefined}
+            style={styles.sectionGap}
+          >
+            {/* Pre-play incentive: the reachable target reads as a subtitle
+                right under the title, not buried below the chart. Mirrors web
+                .daily-distribution-hook. */}
+            {!playedToday && (distribution?.totalPlays || 0) > 0 && (
+              <Text style={styles.hook}>
+                {t('dailyBeatAvgHook', { avg: (distribution!.avgScore || 0).toLocaleString() })}
+              </Text>
+            )}
+            {(distribution?.totalPlays || 0) > 0 ? (
+              <>
+                {distribution!.totalPlays >= 10 ? (
+                  <ScoreDistributionChart
+                    buckets={distribution!.buckets || []}
+                    totalPlays={distribution!.totalPlays}
+                    userScore={playedToday ? userData?.ownScore ?? undefined : undefined}
+                  />
+                ) : (
+                  <Text style={styles.empty}>{t('tooFewPlaysForChart')}</Text>
+                )}
+                <View style={[styles.distMeta, !playedToday && styles.distMetaSolo]}>
+                  {/* Pre-play the hook subtitle already states the average. */}
+                  {playedToday && (
+                    <Text style={styles.distMetaText}>
+                      {t('averageScoreToday', { avg: distribution!.avgScore || 0 })}
+                    </Text>
+                  )}
+                  <Text style={styles.distMetaText}>
+                    {t('sampleSize', { count: distribution!.totalPlays.toLocaleString() })}
+                  </Text>
+                </View>
+                {(() => {
+                  const percentile = playedToday
+                    ? derivePercentile(userData?.ownRank, distribution!.totalPlays)
+                    : null;
+                  if (percentile !== null && percentile >= 20) {
+                    return (
+                      <View style={styles.distStanding}>
+                        <Text style={styles.distStandingPct}>
+                          {t('beatPctPlayers', { pct: percentile })}
+                        </Text>
+                        <Text style={styles.distStandingRank}>
+                          {t('rankOfTotal', { rank: userData.ownRank, total: distribution!.totalPlays.toLocaleString() })}
+                        </Text>
+                      </View>
+                    );
+                  }
+                  return null;
+                })()}
+              </>
+            ) : (
+              <Text style={styles.empty}>{t('dailyLandingNoWinnersYet')}</Text>
+            )}
+          </DailySection>
+        </StaggerSection>
+
+        <StaggerSection delay={220}>
+          <DailySection title={t('dailyHistoryTitle')} style={styles.sectionGap}>
+            <PersonalRecordsCard
+              history={userData?.history || []}
+              streakBest={userData?.streakBest || 0}
+              personalBest={userData?.personalBest || 0}
+              daysPlayed={(userData as { daysPlayed?: number } | null)?.daysPlayed || 0}
+            />
+            {(userData?.history?.length || 0) > 0 && (
+              <DailyHistoryBars14 history={userData?.history || []} today={today} />
+            )}
+          </DailySection>
+        </StaggerSection>
+      </ScrollView>
+
+      <DailyLeaderboardSheet
+        visible={showLeaderboard}
+        date={today}
+        userData={userData}
+        isLoggedIn={isLoggedIn}
+        onSignIn={onSignIn ? () => { setShowLeaderboard(false); onSignIn(); } : undefined}
+        onClose={() => setShowLeaderboard(false)}
+      />
+    </View>
+  );
+}
+
+function Step({ icon, text }: { icon: any; text: string }) {
+  return (
+    <View style={styles.step}>
+      <Ionicons name={icon} size={20} color="#ffd700" />
+      <Text style={styles.stepText}>{text}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: dailyColors.bgBottom },
+  scroll: { flex: 1, backgroundColor: 'transparent' },
+  content: { paddingHorizontal: 18, paddingBottom: 40 },
+  headerBar: { flexDirection: 'row', justifyContent: 'flex-start', marginBottom: 8 },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  heroTitle: {
+    color: '#fff',
+    fontFamily: 'JockeyOne',
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 20,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 8,
+  },
+  // CTA — mirrors web .daily-landing-cta (solid primary + dark border).
+  cta: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    marginBottom: 14,
+    borderWidth: 1.4,
+  },
+  ctaDefault: { backgroundColor: '#245734', borderColor: '#112b18' },
+  ctaPlayed: { backgroundColor: 'rgba(76,175,80,0.9)', borderColor: 'rgba(76,175,80,0.85)' },
+  ctaPressed: { transform: [{ scale: 0.99 }], opacity: 0.95 },
+  ctaTopRow: { flexDirection: 'row', alignItems: 'center' },
+  ctaText: { color: '#fff', fontFamily: 'Lexend-Medium', fontSize: 18 },
+  ctaSubtitle: { color: 'rgba(255,255,255,0.75)', fontFamily: 'Lexend', fontSize: 13, marginTop: 4 },
+  ctaSubtitlePlayed: { color: '#e8f7ea', fontFamily: 'Lexend-Medium' },
+  graceBanner: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,152,0,0.16)',
+    borderColor: 'rgba(255,152,0,0.55)',
+    borderWidth: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    marginBottom: 12,
+  },
+  graceText: { color: '#ffd28a', fontFamily: 'Lexend-SemiBold', fontSize: 13, textAlign: 'center' },
+  userStats: { alignItems: 'center', gap: 10, marginBottom: 8 },
+  signinPrompt: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' },
+  signinPromptText: { color: 'rgba(255,255,255,0.8)', fontFamily: 'Lexend', fontSize: 13, textAlign: 'center' },
+  signinBtn: { paddingHorizontal: 14, paddingVertical: 6, backgroundColor: dailyColors.green, borderRadius: 10 },
+  signinBtnText: { color: '#fff', fontFamily: 'Lexend-SemiBold', fontSize: 13 },
+  sectionGap: { marginTop: 20 },
+  // Deliberately understated — the distribution is the headline, the top-100
+  // board is opt-in. Mirrors web .daily-leaderboard-open-btn.
+  leaderboardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  leaderboardBtnText: { color: '#fff', fontFamily: 'Lexend', fontSize: 12 },
+  steps: { gap: 8 },
+  step: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 10,
+  },
+  stepText: { color: 'rgba(255,255,255,0.85)', fontFamily: 'Lexend', fontSize: 14, flex: 1 },
+  empty: {
+    color: 'rgba(255,255,255,0.6)',
+    fontFamily: 'Lexend',
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
+  // Pre-play incentive hook — subtitle tucked right under the section title
+  // (negative top margin eats into the title row's 12px gap). Mirrors web
+  // .daily-distribution-hook.
+  hook: {
+    color: dailyColors.gold,
+    fontFamily: 'Lexend-SemiBold',
+    fontSize: 14.5,
+    marginTop: -6,
+    marginBottom: 12,
+  },
+  // Distribution meta/standing — same look as DailyResultsScreen's card.
+  distMeta: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  // Pre-play only the plays count renders — keep it on the right edge where
+  // it always sits.
+  distMetaSolo: { justifyContent: 'flex-end' },
+  distMetaText: { color: 'rgba(255,255,255,0.55)', fontFamily: 'Lexend', fontSize: 11 },
+  distStanding: { marginTop: 12, alignItems: 'center', gap: 4 },
+  distStandingPct: { color: dailyColors.gold, fontFamily: 'Lexend-Bold', fontSize: 16 },
+  distStandingRank: { color: 'rgba(255,255,255,0.7)', fontFamily: 'Lexend', fontSize: 12 },
+});
