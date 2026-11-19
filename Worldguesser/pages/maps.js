@@ -1,0 +1,116 @@
+// pages/maps.js
+import React, { useState } from "react";
+import Head from "next/head";
+import { useRouter } from "next/router";
+import MapView from "@/components/maps/mapView";
+import { useTranslation } from '@/components/useTranslations'
+import { asset } from '@/lib/basePath';
+import { COUNTRY_MAP_LIST } from '@/lib/countryMapList';
+
+import { useSession } from "@/components/auth/auth";
+
+const initMakeMap = {
+    open: false,
+    progress: false,
+    name: "",
+    description_short: "",
+    description_long: "",
+    data: "",
+    edit: false,
+    mapId: "",
+};
+
+// Platform builds (Poki/CoolMath/GD/SchoolGuessr/6x) export this page on other
+// origins, so worldguessr.com SEO tags stay off those.
+const isMainSite = process.env.NEXT_PUBLIC_POKI !== "true" &&
+    process.env.NEXT_PUBLIC_COOLMATH !== "true" &&
+    process.env.NEXT_PUBLIC_GAMEDISTRIBUTION !== "true" &&
+    process.env.NEXT_PUBLIC_SCHOOLGUESSR !== "true" &&
+    process.env.NEXT_PUBLIC_6X !== "true";
+
+export default function MapsPage({ }) {
+    const router = useRouter();
+    const { t: text } = useTranslation("common");
+    const { data: session } = useSession();
+    const [makeMap, setMakeMap] = useState(initMakeMap);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [searchResults, setSearchResults] = useState([]);
+
+    return (
+        // maps-page is not decoration: it is this page's membership of the accent
+        // scope in styles/globals.scss, which is what lets the --map-* palette in
+        // styles/mapModal.css follow an equipped background. The modal form of
+        // this same view gets it from .map-modal-content instead.
+        <div className="maps-page" style={styles.page}>
+            <Head>
+                <title>{`${text("communityMaps")} - WorldGuessr`}</title>
+                <meta name="description" content="Browse community-made maps for WorldGuessr, a free GeoGuessr alternative. Play countries, cities and themed challenges, or create your own map." />
+                {isMainSite && <link rel="canonical" href="https://www.worldguessr.com/maps" />}
+                <link rel="icon" type="image/x-icon" href={asset("/icon.ico")} />
+                <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+            </Head>
+            {/* body::before (the site background over black) supplies the backdrop —
+                the same one the home screen and maps modal sit on. MapView
+                draws its own glass panel, so the page adds no shell of its
+                own: just the single scroll container (outer-only scroll, iOS). */}
+            <div style={styles.scroll}>
+                <MapView
+                    showOptions={false}
+                    showAllCountriesOption={false}
+                    close={() => router.push("/")}
+                    closeLabel={text("backToGame")}
+                    session={session}
+                    text={text}
+                    onMapClick={(map) => router.push(`/map/${map.slug}`)}
+                    makeMap={makeMap}
+                    setMakeMap={setMakeMap}
+                    initMakeMap={initMakeMap}
+                    searchTerm={searchTerm}
+                    setSearchTerm={setSearchTerm}
+                    searchResults={searchResults}
+                    setSearchResults={setSearchResults}
+                />
+                {/* Plain links to every official country map, in the exported
+                    HTML. MapView fetches its grid after mount, so without this
+                    the hub links to nothing a crawler can follow. Main site
+                    only: portal builds live on other origins. */}
+                {isMainSite && (
+                    <nav className="maps-country-links" aria-label="Country maps">
+                        <h2 className="map-section-title">Country maps</h2>
+                        <ul>
+                            {COUNTRY_MAP_LIST.map((m) => (
+                                <li key={m.slug}>
+                                    <a href={`/map/${m.slug}`}>
+                                        {/* Same flag source the map page itself uses. Lazy:
+                                            93 tiny images that only load once scrolled to. */}
+                                        <img src={`https://flagcdn.com/w40/${m.countryCode.toLowerCase()}.png`} width="24" height="18" alt="" loading="lazy" decoding="async" />
+                                        <span>{m.name}</span>
+                                    </a>
+                                </li>
+                            ))}
+                        </ul>
+                    </nav>
+                )}
+            </div>
+        </div>
+    );
+}
+
+const styles = {
+    // Fixed viewport shell instead of 100vh (mobile URL bars make vh lie),
+    // mirroring the maps modal's fixed-container + single-scroll structure.
+    page: {
+        position: "fixed",
+        inset: 0,
+        overflow: "hidden",
+    },
+    scroll: {
+        height: "100%",
+        overflowY: "auto",
+        overflowX: "hidden",
+        WebkitOverflowScrolling: "touch",
+        overscrollBehavior: "contain",
+        padding: "20px",
+        boxSizing: "border-box",
+    },
+};
