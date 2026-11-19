@@ -1,0 +1,1229 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  Switch,
+  ActivityIndicator,
+  Animated,
+  Keyboard,
+  PanResponder,
+  useWindowDimensions,
+  BackHandler,
+} from 'react-native';
+import { Pressable } from '../ui/SfxPressable';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { t } from '../../shared';
+import { api, MapItem } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
+import { emitHeartUpdate, onHeartUpdate } from '../../store/heartSync';
+import MapSection, { SECTION_ORDER, SECTION_LABELS } from '../maps/MapSection';
+import MapDetailView from '../maps/MapDetailView';
+import SingleplayerModeTiles, { SingleplayerModeTile } from './SingleplayerModeTiles';
+
+/**
+ * Street View mode. Web (components/maps/mapView.js) has always had three, but
+ * mobile collapsed them into one NMPZ boolean and sent `nm: x, npz: x` — so a
+ * mobile host could not create a No Move party, and editing the options of an
+ * existing No Move party silently upgraded it to NMPZ for everyone.
+ * moving = free; noMove = pan/zoom only; nmpz = frozen.
+ */
+export type SvMode = 'moving' | 'noMove' | 'nmpz';
+
+/** Label for a Street View mode. NMPZ is a proper noun everywhere, untranslated. */
+const svModeLabel = (mode: SvMode) =>
+  mode === 'nmpz' ? 'NMPZ'
+    : mode === 'noMove' ? t('noMove')
+      : t('moving');
+
+/** Label for a comms mode — shared by the dropdown trigger and its menu rows. */
+const commsLabel = (mode?: 'chat' | 'emotes' | 'none') =>
+  mode === 'emotes' ? t('emotes')
+    : mode === 'none' ? t('commsOff')
+      : t('chat');
+
+/**
+ * Inline dropdown option row: label left, compact current-value trigger right —
+ * the same silhouette as the sheet's Switch rows — with the options unfolding
+ * right-aligned beneath while open. The trigger only ever shows the CURRENT
+ * value, so it fits beside any label (the old 3-button segment could not,
+ * which is why these briefly went full-width). One component for every
+ * dropdown in this sheet: Street View mode and Communication today.
+ */
+function OptionDropdown<K extends string>({ icon, label, value, options, open, onToggle, onSelect }: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  value: K;
+  options: readonly { key: K; label: string; sub?: string }[];
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (key: K) => void;
+}) {
+  const current = options.find((o) => o.key === value);
+  return (
+    <>
+      <View style={styles.optionRow}>
+        <View style={styles.optionLabel}>
+          <Ionicons name={icon} size={20} color="#fff" />
+          <Text style={styles.optionText}>{label}</Text>
+        </View>
+        <Pressable
+          onPress={onToggle}
+          style={({ pressed }) => [styles.selectBtn, pressed && { opacity: 0.7 }]}
+        >
+          <Text style={styles.selectBtnText}>{current?.label ?? ''}</Text>
+          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color="rgba(255,255,255,0.7)" />
+        </Pressable>
+      </View>
+      {open && (
+        <View style={styles.selectMenu}>
+          {options.map((o) => (
+            <Pressable
+              key={o.key}
+              onPress={() => onSelect(o.key)}
+              style={({ pressed }) => [styles.selectItem, pressed && { opacity: 0.7 }]}
+            >
+              <View style={styles.optionLabelTextStack}>
+                <Text style={[styles.selectItemText, value === o.key && styles.selectItemTextActive]}>
+                  {o.label}
+                </Text>
+                {o.sub ? <Text style={styles.optionSubtext}>{o.sub}</Text> : null}
+              </View>
+              {value === o.key && <Ionicons name="checkmark" size={16} color="#4CAF50" />}
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </>
+  );
+}
+
+interface MapSelectorModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onSelectMap: (slug: string, name: string) => void;
+  currentMapSlug: string;
+  /** Street View mode — three-way, matching web mapView.js (see SvMode). */
+  svMode: SvMode;
+  onSvModeChange: (v: SvMode) => void;
+  timerEnabled: boolean;
+  onTimerToggle: (v: boolean) => void;
+  timerDuration: number;
+  onTimerDurationChange: (s: number) => void;
+  showOptions?: boolean;
+  showSingleplayerModes?: boolean;
+  currentSingleplayerMode?: SingleplayerModeTile | null;
+  /** Optional rounds stepper (for party mode) */
+  rounds?: number;
+  onRoundsChange?: (r: number) => void;
+  /**
+   * Optional intra-party team-mode config (party mode only — web
+   * partyModal.js Game Mode section). Purely presentational: the parent owns
+   * the state, the send, and the team-duel timer-default rule.
+   */
+  teamConfig?: TeamConfig;
+  onTeamConfigChange?: (config: TeamConfig) => void;
+  /**
+   * Party comms mode: chat XOR emotes, host-set, chat default (user ruling;
+   * web partyModal.js parity). The row renders only when the handler is
+   * provided (singleplayer callers omit it).
+   */
+  comms?: 'chat' | 'emotes' | 'none';
+  onCommsChange?: (v: 'chat' | 'emotes' | 'none') => void;
+  /**
+   * Which comms modes this host may pick. Guest hosts get emotes/off only:
+   * they can neither send chat nor moderate a chat room, so 'chat' is not
+   * theirs to offer (user ruling — they used to get no choice at all).
+   */
+  commsChoices?: readonly ('chat' | 'emotes' | 'none')[];
+  /**
+   * Party guest access (host-only, party mode only): false = signed-in
+   * accounts only. Rendered only when the handler is provided. Sent via its
+   * own setPartySecurity message — never rides setPrivateGameOptions (that
+   * regenerates locations). The LOCK control lives on the lobby card by the
+   * game code, not here.
+   */
+  allowGuests?: boolean;
+  onAllowGuestsChange?: (v: boolean) => void;
+}
+
+export interface TeamConfig {
+  enabled: boolean;
+  scoring: 'closest' | 'average';
+  allowTeamPick: boolean;
+}
+
+interface SelectedMapInfo {
+  slug: string;
+  hearts?: number;
+  hearted?: boolean;
+}
+
+export default function MapSelectorModal({
+  visible,
+  onClose,
+  onSelectMap,
+  currentMapSlug,
+  svMode,
+  onSvModeChange,
+  timerEnabled,
+  onTimerToggle,
+  timerDuration,
+  onTimerDurationChange,
+  showOptions = true,
+  showSingleplayerModes = false,
+  currentSingleplayerMode = null,
+  rounds,
+  onRoundsChange,
+  teamConfig,
+  onTeamConfigChange,
+  comms,
+  onCommsChange,
+  commsChoices = ['chat', 'emotes', 'none'],
+  allowGuests,
+  onAllowGuestsChange,
+}: MapSelectorModalProps) {
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const { secret } = useAuthStore();
+  const SHEET_TOP = insets.top + 12; // space at top like iOS pageSheet
+  const SHEET_HEIGHT = height - SHEET_TOP;
+
+  const [mapHome, setMapHome] = useState<Record<string, MapItem[]>>({});
+  const [searchResults, setSearchResults] = useState<MapItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollOffsetRef = useRef(0);
+  // Search bar's y inside the scroll content (it's a direct child, so
+  // onLayout.y IS the scroll target). Used to pin it to the top on focus.
+  const searchBarYRef = useRef(0);
+
+  // When a map is tapped, show its detail view inline
+  const [selectedMap, setSelectedMap] = useState<SelectedMapInfo | null>(null);
+  // Keep a ref to the selected map so detail view stays mounted during exit animation
+  const selectedMapRef = useRef<SelectedMapInfo | null>(null);
+  const slideAnim = useRef(new Animated.Value(0)).current; // 0 = list, 1 = detail
+
+  // Sheet slide-up animation (mimics iOS pageSheet)
+  const sheetAnim = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+  const [mounted, setMounted] = useState(false);
+  const [commsOpen, setCommsOpen] = useState(false);
+  const [svModeOpen, setSvModeOpen] = useState(false);
+  const closingRef = useRef(false);
+
+  const animateOpen = useCallback(() => {
+    sheetAnim.setValue(SHEET_HEIGHT);
+    backdropAnim.setValue(0);
+    Animated.parallel([
+      Animated.spring(sheetAnim, {
+        toValue: 0,
+        damping: 28,
+        stiffness: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [SHEET_HEIGHT]);
+
+  const animateClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    // The search keyboard must never outlive the sheet: this covers every exit
+    // (checkmark, backdrop tap, swipe-down, Android back, map selected).
+    Keyboard.dismiss();
+    Animated.parallel([
+      Animated.timing(sheetAnim, {
+        toValue: SHEET_HEIGHT,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropAnim, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      closingRef.current = false;
+      onClose();
+    });
+  }, [SHEET_HEIGHT, onClose]);
+
+  useEffect(() => {
+    if (visible) {
+      closingRef.current = false;
+      setMounted(true);
+      // Small delay so React renders the sheet before animating
+      requestAnimationFrame(() => animateOpen());
+    } else {
+      setMounted(false);
+      setSelectedMap(null);
+      selectedMapRef.current = null;
+      slideAnim.setValue(0);
+      sheetAnim.setValue(SHEET_HEIGHT);
+      backdropAnim.setValue(0);
+    }
+  }, [visible]);
+
+  // Swipe-down to dismiss
+  const animateCloseRef = useRef(animateClose);
+  animateCloseRef.current = animateClose;
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 10 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) sheetAnim.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 120 || g.vy > 0.5) {
+          animateCloseRef.current();
+        } else {
+          Animated.spring(sheetAnim, {
+            toValue: 0,
+            damping: 28,
+            stiffness: 300,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  // Handle Android back button
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      animateClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, animateClose]);
+
+  const isLandscape = width > 600;
+  const numCols = isLandscape ? 3 : 2;
+  const countryNumCols = isLandscape ? 4 : 3;
+
+  const showDetail = useCallback((map: SelectedMapInfo) => {
+    selectedMapRef.current = map;
+    setSelectedMap(map);
+    slideAnim.setValue(0);
+    Animated.timing(slideAnim, {
+      toValue: 1,
+      duration: 250,
+      useNativeDriver: true,
+    }).start();
+  }, [slideAnim]);
+
+  const hideDetail = useCallback(() => {
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      setSelectedMap(null);
+      selectedMapRef.current = null;
+    });
+  }, [slideAnim]);
+
+  // Fetch map home data when modal opens. Read secret via getState() at the
+  // moment of fetch so we never use a stale closure value, AND guard with a
+  // fetchToken so a stale in-flight anon fetch can't overwrite a fresh
+  // authenticated fetch (the race that was making myMaps/likedMaps not show).
+  const fetchTokenRef = useRef(0);
+  useEffect(() => {
+    if (!visible) return;
+    const myToken = ++fetchTokenRef.current;
+    setLoading(true);
+    const currentSecret = useAuthStore.getState().secret;
+    console.log('[MapSelectorModal] fetchMapHome — secret present:', !!currentSecret);
+    api.mapHome(currentSecret || undefined)
+      .then((data) => {
+        if (myToken !== fetchTokenRef.current) return;
+        setMapHome(data as Record<string, MapItem[]>);
+      })
+      .catch((e) => {
+        if (myToken !== fetchTokenRef.current) return;
+        console.error('Failed to fetch maps:', e);
+      })
+      .finally(() => {
+        if (myToken !== fetchTokenRef.current) return;
+        setLoading(false);
+      });
+  }, [visible, secret]);
+
+  const handleSearch = useCallback((text: string) => {
+    setSearchQuery(text);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    if (!text || text.trim().length < 3) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const q = text.trim().toLowerCase();
+        // Filter local country maps by substring match
+        const countryMaps = (mapHome['countryMaps'] ?? []).filter(
+          (m) => m.name?.toLowerCase().includes(q)
+        );
+        const results = await api.searchMap(text.trim());
+        const communityResults = Array.isArray(results) ? results : [];
+        // Country matches first, then community results
+        setSearchResults([...countryMaps, ...communityResults]);
+      } catch {
+        // Still show country matches even if API fails
+        const q = text.trim().toLowerCase();
+        const countryMaps = (mapHome['countryMaps'] ?? []).filter(
+          (m) => m.name?.toLowerCase().includes(q)
+        );
+        setSearchResults(countryMaps);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 400);
+  }, [mapHome]);
+
+  // Navigate to inline detail view with slide animation. Drop the search
+  // keyboard first — the sheet stays open, so nothing else would dismiss it
+  // and it sat over the detail view.
+  const handleMapPress = useCallback((map: MapItem) => {
+    Keyboard.dismiss();
+    const slug = map.slug || map.countryMap;
+    showDetail({
+      slug: slug!,
+      hearts: map.hearts,
+      hearted: map.hearted,
+    });
+  }, [showDetail]);
+
+  // "Select Map" from detail view
+  const handleDetailPlay = useCallback((slug: string, name: string) => {
+    selectedMapRef.current = null;
+    setSelectedMap(null);
+    slideAnim.setValue(0);
+    onSelectMap(slug, name);
+    animateClose();
+  }, [onSelectMap, slideAnim, animateClose]);
+
+  // Sync heart changes from detail page back to tile lists
+  useEffect(() => {
+    return onHeartUpdate(({ mapId, hearted: h, hearts: hc }) => {
+      setMapHome((prev) => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach((section) => {
+          if (Array.isArray(updated[section])) {
+            updated[section] = updated[section].map((m) =>
+              m.id === mapId ? { ...m, hearts: hc, hearted: h } : m
+            );
+          }
+        });
+        return updated;
+      });
+      setSearchResults((prev) =>
+        prev.map((m) => (m.id === mapId ? { ...m, hearts: hc, hearted: h } : m))
+      );
+    });
+  }, []);
+
+  // Heart functionality (same as maps tab)
+  const [heartingMap, setHeartingMap] = useState('');
+  const lastHeartTimeRef = useRef(0);
+  const handleHeartMap = useCallback(async (map: MapItem) => {
+    if (!secret) return;
+    if (!map.id || heartingMap) return;
+    const now = Date.now();
+    if (now - lastHeartTimeRef.current < 500) return;
+    lastHeartTimeRef.current = now;
+    setHeartingMap(map.id);
+
+    const newHearted = !map.hearted;
+    const newHearts = map.hearts + (newHearted ? 1 : -1);
+
+    const updateMaps = (mapId: string, hearted: boolean, hearts: number) => {
+      setMapHome((prev) => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach((section) => {
+          if (Array.isArray(updated[section])) {
+            updated[section] = updated[section].map((m) =>
+              m.id === mapId ? { ...m, hearts, hearted } : m
+            );
+          }
+        });
+        return updated;
+      });
+      setSearchResults((prev) =>
+        prev.map((m) => (m.id === mapId ? { ...m, hearts, hearted } : m))
+      );
+    };
+
+    updateMaps(map.id, newHearted, newHearts);
+
+    try {
+      const result = await api.heartMap(secret, map.id);
+      if (result.success) {
+        updateMaps(map.id, result.hearted, result.hearts);
+        emitHeartUpdate({ mapId: map.id, hearted: result.hearted, hearts: result.hearts });
+      } else {
+        updateMaps(map.id, map.hearted!, map.hearts);
+      }
+    } catch (e) {
+      console.error('Heart map error:', e);
+      updateMaps(map.id, map.hearted!, map.hearts);
+    } finally {
+      setHeartingMap('');
+    }
+  }, [secret, heartingMap]);
+
+  const isSearching = searchQuery.trim().length >= 3;
+
+  if (!mounted) return null;
+
+  return (
+    <View style={styles.overlay}>
+      {/* Dark backdrop */}
+      <Animated.View
+        style={[styles.backdrop, { opacity: backdropAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) }]}
+      >
+        <Pressable sfx="none" style={StyleSheet.absoluteFillObject} onPress={() => animateClose()} />
+      </Animated.View>
+
+      {/* Sheet */}
+      <Animated.View
+        style={[
+          styles.sheet,
+          { top: SHEET_TOP, height: SHEET_HEIGHT, transform: [{ translateY: sheetAnim }] },
+        ]}
+      >
+        {/* Drag handle */}
+        <View style={styles.handleBar} {...panResponder.panHandlers}>
+          <View style={styles.handle} />
+        </View>
+
+        <View style={[styles.container, { paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
+        {/* List view - slides left when detail is shown */}
+        <Animated.View style={[
+          styles.slidePanel,
+          {
+            transform: [{
+              translateX: slideAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, -width],
+              }),
+            }],
+          },
+        ]}>
+            {/* Header */}
+            <View style={styles.header}>
+              <Text style={styles.headerTitle}>{t('gameOptions')}</Text>
+              <Pressable
+                style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.6 }]}
+                onPress={() => animateClose()}
+              >
+                <Ionicons name="checkmark" size={24} color="#fff" />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              ref={scrollRef}
+              onScroll={(e) => { scrollOffsetRef.current = e.nativeEvent.contentOffset.y; }}
+              scrollEventThrottle={16}
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            >
+              {/* ── Game Options ── */}
+              {showOptions && (
+              <View style={styles.optionsCard}>
+                {/* Game Mode: Classic (FFA) vs Team Duel + the team
+                    sub-options (party mode only — web partyModal.js). */}
+                {teamConfig && onTeamConfigChange && (
+                  <>
+                    <View style={styles.optionRow}>
+                      <View style={styles.optionLabel}>
+                        <Ionicons name="people-outline" size={20} color="#fff" />
+                        <Text style={styles.optionText}>{t('gameMode')}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.segRow}>
+                      {([false, true] as const).map((team) => (
+                        <Pressable
+                          key={String(team)}
+                          style={[styles.segBtn, teamConfig.enabled === team && styles.segBtnActive]}
+                          onPress={() => onTeamConfigChange({ ...teamConfig, enabled: team })}
+                        >
+                          <Text
+                            style={[
+                              styles.segBtnText,
+                              teamConfig.enabled === team && styles.segBtnTextActive,
+                            ]}
+                          >
+                            {t(team ? 'teamDuel' : 'classicMode')}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    <Text style={styles.optionHint}>
+                      {t(teamConfig.enabled ? 'teamDuelModeHint' : 'classicModeHint')}
+                    </Text>
+                    {teamConfig.enabled && (
+                      <>
+                        <View style={styles.segRow}>
+                          {(['closest', 'average'] as const).map((mode) => (
+                            <Pressable
+                              key={mode}
+                              style={[styles.segBtn, teamConfig.scoring === mode && styles.segBtnActive]}
+                              onPress={() => onTeamConfigChange({ ...teamConfig, scoring: mode })}
+                            >
+                              <Text
+                                style={[
+                                  styles.segBtnText,
+                                  teamConfig.scoring === mode && styles.segBtnTextActive,
+                                ]}
+                              >
+                                {t(mode === 'average' ? 'scoringAverage' : 'scoringClosest')}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                        <Text style={styles.optionHint}>
+                          {t(teamConfig.scoring === 'average' ? 'scoringAverageHint' : 'scoringClosestHint')}
+                        </Text>
+                        <View style={styles.optionRow}>
+                          <View style={styles.optionLabel}>
+                            <Ionicons name="swap-horizontal-outline" size={20} color="#fff" />
+                            <Text style={styles.optionText}>{t('allowTeamPickShort')}</Text>
+                          </View>
+                          <Switch
+                            value={teamConfig.allowTeamPick}
+                            onValueChange={(v) => onTeamConfigChange({ ...teamConfig, allowTeamPick: v })}
+                            trackColor={{ false: 'rgba(255,255,255,0.2)', true: '#4CAF50' }}
+                            thumbColor="#fff"
+                          />
+                        </View>
+                      </>
+                    )}
+                    <View style={styles.divider} />
+                  </>
+                )}
+                {/* Rounds (party mode only) */}
+                {onRoundsChange && rounds !== undefined && (
+                  <>
+                    <View style={styles.optionRow}>
+                      <View style={styles.optionLabel}>
+                        <Ionicons name="repeat-outline" size={20} color="#fff" />
+                        <Text style={styles.optionText}>{t('rounds')}</Text>
+                      </View>
+                      <View style={styles.stepperRowInline}>
+                        <Pressable
+                          style={({ pressed }) => [styles.stepperBtn, pressed && { opacity: 0.6 }, rounds <= 1 && { opacity: 0.3 }]}
+                          onPress={() => onRoundsChange(Math.max(1, rounds - 1))}
+                          disabled={rounds <= 1}
+                        >
+                          <Ionicons name="remove" size={20} color="#fff" />
+                        </Pressable>
+                        <Text style={styles.stepperValue}>{rounds}</Text>
+                        <Pressable
+                          style={({ pressed }) => [styles.stepperBtn, pressed && { opacity: 0.6 }, rounds >= 20 && { opacity: 0.3 }]}
+                          onPress={() => onRoundsChange(Math.min(20, rounds + 1))}
+                          disabled={rounds >= 20}
+                        >
+                          <Ionicons name="add" size={20} color="#fff" />
+                        </Pressable>
+                      </View>
+                    </View>
+                    <View style={styles.divider} />
+                  </>
+                )}
+                {/* Street View mode — Moving / No Move / NMPZ, the same three
+                    the web dropdown offers (mapView.js). */}
+                <OptionDropdown
+                  icon="footsteps-outline"
+                  label={t('mode')}
+                  value={svMode}
+                  options={[
+                    { key: 'moving', label: svModeLabel('moving') },
+                    { key: 'noMove', label: svModeLabel('noMove') },
+                    { key: 'nmpz', label: 'NMPZ', sub: t('nmpzExpansion') },
+                  ] as const}
+                  open={svModeOpen}
+                  onToggle={() => { setSvModeOpen((o) => !o); setCommsOpen(false); }}
+                  onSelect={(mode) => { onSvModeChange(mode); setSvModeOpen(false); }}
+                />
+
+                {/* Timer Toggle */}
+                <View style={styles.divider} />
+                <View style={styles.optionRow}>
+                  <View style={styles.optionLabel}>
+                    <Ionicons name="timer-outline" size={20} color="#fff" />
+                    <Text style={styles.optionText}>{t('enableTimer')}</Text>
+                  </View>
+                  <Switch
+                    value={timerEnabled}
+                    onValueChange={onTimerToggle}
+                    trackColor={{ false: 'rgba(255,255,255,0.2)', true: '#4CAF50' }}
+                    thumbColor="#fff"
+                  />
+                </View>
+
+                {/* Timer Duration Stepper */}
+                {timerEnabled && (
+                  <View style={styles.stepperRow}>
+                    <Pressable
+                      style={({ pressed }) => [styles.stepperBtn, pressed && { opacity: 0.6 }, timerDuration <= 10 && { opacity: 0.3 }]}
+                      onPress={() => onTimerDurationChange(Math.max(10, timerDuration - 5))}
+                      disabled={timerDuration <= 10}
+                    >
+                      <Ionicons name="remove" size={20} color="#fff" />
+                    </Pressable>
+                    <Text style={styles.stepperValue}>{t('secondsShort', { secs: timerDuration })}</Text>
+                    <Pressable
+                      style={({ pressed }) => [styles.stepperBtn, pressed && { opacity: 0.6 }, timerDuration >= 300 && { opacity: 0.3 }]}
+                      onPress={() => onTimerDurationChange(Math.min(300, timerDuration + 5))}
+                      disabled={timerDuration >= 300}
+                    >
+                      <Ionicons name="add" size={20} color="#fff" />
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* Comms mode — chat XOR emotes, party mode only (web
+                    partyModal.js parity; chat is the fresh-party default).
+                    Guest hosts get emotes/off only (commsChoices). */}
+                {onCommsChange && (
+                  <>
+                    <View style={styles.divider} />
+                    <OptionDropdown
+                      icon="chatbubble-ellipses-outline"
+                      label={t('communication')}
+                      value={comms ?? 'chat'}
+                      options={commsChoices.map((mode) => ({ key: mode, label: commsLabel(mode) }))}
+                      open={commsOpen}
+                      onToggle={() => { setCommsOpen((o) => !o); setSvModeOpen(false); }}
+                      onSelect={(mode) => { onCommsChange(mode); setCommsOpen(false); }}
+                    />
+                  </>
+                )}
+
+                {/* Guest access (web partyModal parity: guests off =
+                    signed-in accounts only). Lock is the button by the game
+                    code on the lobby card. */}
+                {onAllowGuestsChange && (
+                  <>
+                    <View style={styles.divider} />
+                    <View style={styles.optionRow}>
+                      <View style={styles.optionLabel}>
+                        <Ionicons name="person-add-outline" size={20} color="#fff" />
+                        <Text style={styles.optionText}>{t('allowGuests')}</Text>
+                      </View>
+                      <Switch
+                        value={allowGuests !== false}
+                        onValueChange={onAllowGuestsChange}
+                        trackColor={{ false: 'rgba(255,255,255,0.2)', true: '#4CAF50' }}
+                        thumbColor="#fff"
+                      />
+                    </View>
+                  </>
+                )}
+              </View>
+              )}
+
+              {/* ── Map Selection ── */}
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionAccent} />
+                <Text style={styles.sectionHeaderText}>{t('selectMap')}</Text>
+              </View>
+
+              {/* Search — ABOVE the mode tiles. Mode tiles (World / Country
+                  Guesser / Continent Guesser) are not part of search; they
+                  disappear entirely the moment any text is typed. */}
+              <View
+                style={styles.searchContainer}
+                onLayout={(e) => { searchBarYRef.current = e.nativeEvent.layout.y; }}
+              >
+                <Ionicons name="search" size={18} color="#666" />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder={t('searchForMaps')}
+                  placeholderTextColor="#999"
+                  value={searchQuery}
+                  onChangeText={handleSearch}
+                  // Pin the bar to the top of the sheet when focused: under
+                  // edgeToEdge the window never resizes for the keyboard, so
+                  // Android's native scroll-into-view is dead (and iOS never
+                  // had one) — a low-sitting bar stayed buried under the IME.
+                  // Top position = guaranteed clearance at any keyboard height,
+                  // with results painting right below it.
+                  onFocus={() => {
+                    scrollRef.current?.scrollTo({
+                      y: Math.max(0, searchBarYRef.current - 8),
+                      animated: true,
+                    });
+                  }}
+                  returnKeyType="search"
+                  autoCorrect={false}
+                />
+                {searchQuery.length > 0 && (
+                  <Pressable onPress={() => handleSearch('')} hitSlop={8}>
+                    <Ionicons name="close-circle" size={18} color="#999" />
+                  </Pressable>
+                )}
+              </View>
+
+              {searchQuery.trim().length === 0 && (
+                showSingleplayerModes ? (
+                  <SingleplayerModeTiles
+                    currentMode={currentSingleplayerMode}
+                    onSelect={(mode) => {
+                      if (mode === 'world') onSelectMap('all', t('world'));
+                      if (mode === 'country') onSelectMap('__countryGuesser', t('countryGuesser'));
+                      if (mode === 'continent') onSelectMap('__continentGuesser', t('continentGuesser'));
+                      animateClose();
+                    }}
+                  />
+                ) : (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.allCountriesTile,
+                      currentMapSlug === 'all' && styles.allCountriesTileActive,
+                      pressed && { opacity: 0.8 },
+                    ]}
+                    onPress={() => { onSelectMap('all', t('world')); animateClose(); }}
+                  >
+                    <LinearGradient
+                      colors={['#1a4423', '#245734']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <Ionicons name="globe-outline" size={24} color="#fff" />
+                    <Text style={styles.allCountriesText}>{t('world')}</Text>
+                    {currentMapSlug === 'all' && (
+                      <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                    )}
+                  </Pressable>
+                )
+              )}
+
+              {/* Map Sections */}
+              {loading ? (
+                // Same height floor as the search branch: keeps the focus
+                // pin-to-top scroll reachable if the user taps search mid-load.
+                <View style={{ minHeight: SHEET_HEIGHT }}>
+                  <View style={styles.centered}>
+                    <ActivityIndicator size="large" color="#4CAF50" />
+                    <Text style={styles.loadingText}>{t('loadingMaps')}</Text>
+                  </View>
+                </View>
+              ) : isSearching ? (
+                /* Height floor while searching: each keystroke swaps this region
+                   between results / spinner / empty state, and in party mode the
+                   options card puts the search bar a full screen down — so when
+                   the big map sections collapse to a lone spinner, the content
+                   shrinks below the current scroll offset and the ScrollView
+                   CLAMPS it (the glitchy snap while typing). Reserving a sheet's
+                   worth of height keeps the offset valid through every swap, so
+                   the view never jumps; results simply paint in place below the
+                   bar. */
+                <View style={{ minHeight: SHEET_HEIGHT }}>
+                  {(() => {
+                    const countryResults = searchResults.filter((m) => m.countryMap);
+                    const communityResults = searchResults.filter((m) => !m.countryMap);
+                    return (
+                      <>
+                        {countryResults.length > 0 && (
+                          <MapSection
+                            title={t('countries')}
+                            maps={countryResults}
+                            isCountry
+                            onMapPress={handleMapPress}
+                            onHeartMap={secret ? handleHeartMap : undefined}
+                            heartingMapId={heartingMap}
+                            numCols={countryNumCols}
+                          />
+                        )}
+                        {communityResults.length > 0 && (
+                          <MapSection
+                            title={t('communityMaps')}
+                            maps={communityResults}
+                            onMapPress={handleMapPress}
+                            onHeartMap={secret ? handleHeartMap : undefined}
+                            heartingMapId={heartingMap}
+                            numCols={numCols}
+                          />
+                        )}
+                      </>
+                    );
+                  })()}
+                  {!searchLoading && searchResults.length === 0 && (
+                    <View style={styles.centered}>
+                      <Ionicons name="search" size={32} color="rgba(255,255,255,0.3)" />
+                      <Text style={styles.loadingText}>{t('noMapsFound')}</Text>
+                    </View>
+                  )}
+                  {searchLoading && (
+                    <ActivityIndicator size="small" color="white" style={{ marginTop: 12 }} />
+                  )}
+                </View>
+              ) : (
+                <>
+                  {SECTION_ORDER.map((key) => {
+                    const maps = mapHome[key];
+                    if (!Array.isArray(maps) || maps.length === 0) return null;
+                    return (
+                      <MapSection
+                        key={key}
+                        title={t(SECTION_LABELS[key])}
+                        maps={maps}
+                        isCountry={key === 'countryMaps'}
+                        onMapPress={handleMapPress}
+                        onHeartMap={secret ? handleHeartMap : undefined}
+                        heartingMapId={heartingMap}
+                        numCols={key === 'countryMaps' ? countryNumCols : numCols}
+                        scrollRef={scrollRef}
+                        scrollOffsetRef={scrollOffsetRef}
+                      />
+                    );
+                  })}
+                </>
+              )}
+
+              <View style={{ height: 40 }} />
+            </ScrollView>
+        </Animated.View>
+
+        {/* Detail view - slides in from the right */}
+        {(selectedMap || selectedMapRef.current) && (
+          <Animated.View style={[
+            styles.slidePanel,
+            styles.detailPanel,
+            { paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right },
+            {
+              transform: [{
+                translateX: slideAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [width, 0],
+                }),
+              }],
+            },
+          ]}>
+            <MapDetailView
+              slug={(selectedMap || selectedMapRef.current)!.slug}
+              onBack={hideDetail}
+              onPlay={handleDetailPlay}
+              playLabel={t('selectMap')}
+              initialHearts={(selectedMap || selectedMapRef.current)!.hearts}
+              initialHearted={(selectedMap || selectedMapRef.current)!.hearted}
+            />
+          </Animated.View>
+        )}
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 100,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
+  },
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: '#0a1a0c',
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    overflow: 'hidden',
+  },
+  handleBar: {
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  handle: {
+    width: 36,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  container: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+  slidePanel: {
+    flex: 1,
+  },
+  detailPanel: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#0a1a0c',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontFamily: 'Lexend-Bold',
+    color: '#fff',
+  },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+
+  // Game Options
+  optionsCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  // OptionDropdown: compact trigger inline with the label (Switch-row
+  // silhouette), options unfolding right-aligned beneath while open.
+  selectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  selectBtnText: {
+    color: '#fff',
+    fontFamily: 'Lexend-SemiBold',
+    fontSize: 14,
+  },
+  selectMenu: {
+    alignSelf: 'flex-end',
+    minWidth: 200,
+    marginTop: 2,
+    marginBottom: 6,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  selectItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  selectItemText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontFamily: 'Lexend-SemiBold',
+    fontSize: 14,
+  },
+  selectItemTextActive: {
+    color: '#fff',
+  },
+  optionLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 1,
+  },
+  optionLabelTextStack: {
+    flexShrink: 1,
+  },
+  optionText: {
+    fontSize: 16,
+    fontFamily: 'Lexend-SemiBold',
+    color: '#fff',
+  },
+  optionSubtext: {
+    fontSize: 12,
+    fontFamily: 'Lexend',
+    color: 'rgba(255,255,255,0.4)',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: 12,
+  },
+  // Segmented control (Game Mode / Scoring — web party-lobby__seg parity).
+  segRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 3,
+    marginTop: 8,
+  },
+  segBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 9,
+    alignItems: 'center',
+  },
+  segBtnActive: {
+    backgroundColor: '#4CAF50',
+  },
+  segBtnText: {
+    fontSize: 14,
+    fontFamily: 'Lexend-SemiBold',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  segBtnTextActive: {
+    color: '#fff',
+  },
+  optionHint: {
+    fontSize: 12,
+    fontFamily: 'Lexend',
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    gap: 16,
+  },
+  stepperRowInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stepperBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stepperValue: {
+    fontSize: 18,
+    fontFamily: 'Lexend-Bold',
+    color: '#4CAF50',
+    minWidth: 56,
+    textAlign: 'center',
+  },
+
+  // Section header
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  sectionAccent: {
+    width: 4,
+    height: 22,
+    borderRadius: 2,
+    backgroundColor: '#3a7a52',
+  },
+  sectionHeaderText: {
+    fontSize: 20,
+    fontFamily: 'Lexend-SemiBold',
+    color: '#fff',
+  },
+
+  // All Countries tile
+  allCountriesTile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  allCountriesTileActive: {
+    borderColor: '#4CAF50',
+  },
+  allCountriesText: {
+    flex: 1,
+    fontSize: 16,
+    fontFamily: 'Lexend-SemiBold',
+    color: '#fff',
+  },
+
+  // Search
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 25,
+    paddingHorizontal: 16,
+    gap: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+    marginBottom: 20,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 15,
+    lineHeight: 20,
+    letterSpacing: 0,
+    color: '#333',
+  },
+
+  // States
+  centered: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 15,
+    fontFamily: 'Lexend',
+    color: 'rgba(255,255,255,0.7)',
+  },
+});
