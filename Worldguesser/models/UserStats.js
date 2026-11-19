@@ -1,0 +1,219 @@
+import mongoose from 'mongoose';
+import { STARTING_ELO } from '../components/utils/ratingFlags.js';
+
+const userStatsSchema = new mongoose.Schema({
+  // User identification
+  userId: { 
+    type: String, 
+    required: true,
+    index: true // For efficient user queries
+  },
+  
+  // Timestamp for this data point
+  timestamp: { 
+    type: Date, 
+    required: true,
+    index: true // For time-based queries
+  },
+  
+  // XP data
+  totalXp: { 
+    type: Number, 
+    required: true,
+    min: 0
+  },
+  xpRank: { 
+    type: Number, 
+    required: true,
+    min: 1
+  },
+  
+  // ELO data
+  elo: { 
+    type: Number, 
+    required: true,
+    min: 0,
+    default: STARTING_ELO // whichever ladder is live; see ratingFlags.js
+  },
+  eloRank: { 
+    type: Number, 
+    required: true,
+    min: 1
+  },
+  
+  // Additional context (optional)
+  triggerEvent: {
+    type: String,
+    enum: ['game_completed', 'weekly_update', 'account_created', 'elo_refund'],
+    default: 'game_completed'
+  },
+  
+  // Reference to the game that triggered this update (if applicable)
+  gameId: {
+    type: String,
+    default: null
+  },
+  // Duel rows only. true when the game MOVED (or seeded) the rating, false
+  // for a passive snapshot: bot duel, unranked 1v1, unseeded placement. The
+  // daily ELO board diffs a user's oldest and latest row in its window
+  // (cron.js computeLeaderboardForMode), so a passive row at the 500 entry
+  // rating followed by a 500..900 placement seed would read as a gain.
+  // Absent on non-duel rows and on rows written before this field existed.
+  rated: {
+    type: Boolean
+  },
+  
+  // ELO refund details (only for triggerEvent: 'elo_refund')
+  eloRefundDetails: {
+    amount: { type: Number, default: null },           // Amount of ELO refunded
+    bannedUserId: { type: String, default: null },     // The user who was banned
+    bannedUsername: { type: String, default: null },   // Username of banned user at time of refund
+    moderationLogId: { type: String, default: null }   // Reference to moderation log
+  },
+  
+  // Set once by scripts/repairRefundUserStats.js on a row whose `elo` was
+  // inflated by the pre-migration refund scale bug and has since been corrected.
+  //
+  // THE ONLY THING MAKING THAT REPAIR RE-RUNNABLE. The correction is derived
+  // from the refunded games, which never change, so without a marker a second
+  // run recomputes the same debit against the already-corrected value and
+  // applies it twice. Pinning the write to the expected value stops a race, not
+  // a re-run.
+  refundScaleCorrected: { type: Boolean, default: false },
+
+  // Metadata
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Production-grade indexes for 2M+ users with 20k daily active
+userStatsSchema.index({ userId: 1, timestamp: -1 }); // User's stats over time (descending)
+userStatsSchema.index({ userId: 1, timestamp: 1 });  // User's stats over time (ascending)
+userStatsSchema.index({ userId: 1, triggerEvent: 1, timestamp: 1 }); // For getUserProgression filtering out elo_refund
+userStatsSchema.index({ timestamp: -1, xpRank: 1 });  // Leaderboard snapshots by XP
+userStatsSchema.index({ timestamp: -1, eloRank: 1 }); // Leaderboard snapshots by ELO
+
+// CRITICAL: Production performance indexes for daily leaderboards
+userStatsSchema.index({ timestamp: -1, userId: 1 }); // Efficient timestamp range + userId lookup
+userStatsSchema.index({ timestamp: -1, totalXp: -1 }); // Fast XP leaderboard by time
+userStatsSchema.index({ timestamp: -1, elo: -1 }); // Fast ELO leaderboard by time
+userStatsSchema.index({ timestamp: -1, userId: 1, totalXp: -1 }); // Compound for XP daily queries  
+userStatsSchema.index({ timestamp: -1, userId: 1, elo: -1 }); // Compound for ELO daily queries
+
+// Static methods for common queries
+userStatsSchema.statics = {
+  
+  // Get user's stats progression over time
+  async getUserProgression(userId, timeframe = '30d') {
+    const timeframeDays = parseInt(timeframe.replace('d', ''));
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - timeframeDays);
+    
+    return this.find({
+      userId: userId,
+      timestamp: { $gte: startDate }
+    }).sort({ timestamp: 1 }).lean();
+  },
+  
+  // Get user's latest stats
+  async getLatestStats(userId) {
+    return this.findOne({ userId: userId })
+      .sort({ timestamp: -1 })
+      .lean();
+  },
+  
+  // Get multiple users' latest stats
+  async getLatestStatsForUsers(userIds) {
+    const pipeline = [
+      { $match: { userId: { $in: userIds } } },
+      { $sort: { userId: 1, timestamp: -1 } },
+      { 
+        $group: {
+          _id: '$userId',
+          latestStats: { $first: '$$ROOT' }
+        }
+      },
+      { $replaceRoot: { newRoot: '$latestStats' } }
+    ];
+    
+    return this.aggregate(pipeline);
+  },
+  
+  // Get rank distribution at a specific time
+  async getRankDistributionAt(timestamp, type = 'xp') {
+    const rankField = type === 'xp' ? 'xpRank' : 'eloRank';
+    const scoreField = type === 'xp' ? 'totalXp' : 'elo';
+    
+    return this.aggregate([
+      { 
+        $match: { 
+          timestamp: { 
+            $gte: new Date(timestamp.getTime() - 60000), // 1 minute window
+            $lte: new Date(timestamp.getTime() + 60000)
+          }
+        }
+      },
+      {
+        $group: {
+          _id: `$${rankField}`,
+          count: { $sum: 1 },
+          avgScore: { $avg: `$${scoreField}` }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+  },
+  
+  // Get top performers over time period
+  async getTopPerformers(timeframe = '7d', type = 'xp', limit = 10) {
+    const timeframeDays = parseInt(timeframe.replace('d', ''));
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - timeframeDays);
+    
+    const scoreField = type === 'xp' ? 'totalXp' : 'elo';
+    
+    const pipeline = [
+      { $match: { timestamp: { $gte: startDate } } },
+      { $sort: { userId: 1, timestamp: -1 } },
+      { 
+        $group: {
+          _id: '$userId',
+          latestStats: { $first: '$$ROOT' },
+          earliestStats: { $last: '$$ROOT' }
+        }
+      },
+      {
+        $project: {
+          userId: '$_id',
+          currentScore: `$latestStats.${scoreField}`,
+          previousScore: `$earliestStats.${scoreField}`,
+          improvement: { 
+            $subtract: [`$latestStats.${scoreField}`, `$earliestStats.${scoreField}`] 
+          },
+          currentRank: type === 'xp' ? '$latestStats.xpRank' : '$latestStats.eloRank'
+        }
+      },
+      { $sort: { improvement: -1 } },
+      { $limit: limit }
+    ];
+    
+    return this.aggregate(pipeline);
+  }
+};
+
+// Instance methods
+userStatsSchema.methods.getProgressionSince = function(days) {
+  const startDate = new Date(this.timestamp);
+  startDate.setDate(startDate.getDate() - days);
+  
+  return this.constructor.find({
+    userId: this.userId,
+    timestamp: { $gte: startDate, $lte: this.timestamp }
+  }).sort({ timestamp: 1 });
+};
+
+const UserStats = mongoose.model('UserStats', userStatsSchema);
+
+export default UserStats;
