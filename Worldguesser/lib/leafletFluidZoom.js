@@ -1,0 +1,593 @@
+import L from 'leaflet';
+import { prepareGroupedTileLevel } from '@/lib/leafletGroupedTiles';
+
+/**
+ * Fluid scroll-wheel zoom for Leaflet: instead of stepping a whole zoom level
+ * per wheel notch, wheel input moves a zoom target and a rAF loop glides the
+ * actual zoom toward it in fractional increments, anchored at the cursor.
+ *
+ * Local fork of a public Leaflet wheel-zoom smoothing plugin (credited in the
+ * README's Acknowledgements) so we can tweak the feel freely. Fork changes:
+ *   - renamed API: options `fluidWheelZoom` / `fluidWheelZoomSensitivity` /
+ *     `fluidWheelZoomEase` / `fluidWheelZoomMinSpeed` / `fluidWheelZoomMaxSpeed`,
+ *     handler `L.Map.FluidWheelZoom`
+ *   - rate shaping in speed units: while the wheel is scrolling, sustained
+ *     zoom speed is pinned between fluidWheelZoomMinSpeed (slow-mouse
+ *     compensation) and fluidWheelZoomMaxSpeed (flick cap), levels/second.
+ *     See the knob cheat sheet above the mergeOptions block.
+ *   - re-anchors at the cursor on every wheel event. Upstream pinned the
+ *     GESTURE-START anchor to the moving cursor, which dragged the whole map
+ *     sideways along with the mouse mid-zoom.
+ *   - retargetable cubic-Hermite easing evaluated on absolute time (see
+ *     _glideState) instead of upstream's fixed 30%-per-FRAME exponential
+ *     lerp: identical glide on 60Hz and 240Hz displays, C1-continuous
+ *     chaining between wheel notches (each notch re-segments from the exact
+ *     current zoom AND velocity), and a bounded-time landing that arrives ON
+ *     the goal with zero terminal velocity. An exponential approach never
+ *     lands — it creeps sub-pixel for hundreds of ms, which shimmers against
+ *     Leaflet's whole-pixel transform rounding (tile translates and marker
+ *     positions round independently every frame) and read as the map
+ *     "shaking" at the end of every zoom, worst on low-Hz displays.
+ *   - full float zoom precision mid-glide. Upstream floored zoom to 0.01
+ *     steps each frame; on high-Hz displays most frames moved less than one
+ *     quantum and the zoom visibly stair-stepped.
+ *   - integer rest: the landing target is the fractional intent snapped AT
+ *     WHEEL TIME to whole levels (zoomSnap is also 1 app-wide for crisp
+ *     pinch rest — see SafeMapContainer), so the glide always comes to rest
+ *     on a whole zoom level — raster tiles rest at native 1:1 scale instead
+ *     of parking CSS-scaled with shrunken/blurry label text. One notch from
+ *     rest = exactly one level. (Snapping at idle instead was tried and
+ *     reverted: it moved the map after the wheel had stopped.)
+ *   - the gesture only ends once the glide has landed, rather than being
+ *     cut off mid-ease by a fixed idle timeout
+ *   - if anything else moves the map mid-gesture (invalidateSize from a
+ *     layout change, a setView, an animation) the gesture aborts completely,
+ *     closing its move state; the next wheel event starts fresh
+ *   - respects maxBounds every glide frame via a CONTINUOUS clamp (same
+ *     geometry as the _limitCenter clamp setView applies; raw _move has none,
+ *     so zoom-out near an edge could drift the view out of bounds and get
+ *     snapped back on moveend). See limitCenterSmooth for why the stock
+ *     function can't be fed back per frame.
+ *   - per-frame _move is tagged {flyTo: true} so GridLayer rides its ANIMATED
+ *     tile path (deferred pruning, no per-frame abort/re-queue of tile
+ *     fetches) — untagged, every frame tore the tile pipeline down, which
+ *     gutted zoom-out (its coarse backfill tiles need fetching, and the
+ *     fetches kept being aborted)
+ *   - grouped tile swap (see leafletGroupedTiles): after 200ms of wheel idle,
+ *     only the FINAL integer level is preloaded/crossfaded. Intermediate
+ *     levels crossed by a fast multi-notch burst are never requested, so
+ *     labels don't jump size several times in one scroll.
+ *   - auto-disables Leaflet's stock stepped scrollWheelZoom handler if both
+ *     are enabled (they would double-handle every wheel event)
+ *   - clean teardown when the handler is removed mid-wheel: the upstream left
+ *     its end-timeout and rAF running, which could poke a removed map
+ *     (this app unmounts maps mid-interaction at round transitions)
+ *
+ * Usage (react-leaflet): pass `scrollWheelZoom={false} fluidWheelZoom` on the
+ * MapContainer. Use `fluidWheelZoom="center"` to zoom about the map center
+ * instead of the cursor. The handler is registered on L.Map when this module
+ * is imported; maps without the option are untouched.
+ */
+
+// Outside the registration guard so edited numbers apply on every reload.
+// THE THREE FEEL KNOBS (independent, human units):
+//   fluidWheelZoomEase      ms one glide segment takes to land on its goal
+//                           (each wheel notch starts a fresh segment from the
+//                           current zoom+velocity). Lower = snappier stop,
+//                           higher = longer coast after the wheel stops.
+//   fluidWheelZoomMinSpeed  zoom-levels/second, the SLOWEST the zoom moves
+//                           while the wheel is actively scrolling. This is
+//                           the slow-mouse compensation: raise it and gentle
+//                           or feather-delta scrolling zooms faster. (The
+//                           post-release coast always runs to the nearest
+//                           whole level — see the integer-rest snap in
+//                           _onWheeling.)
+//   fluidWheelZoomMaxSpeed  zoom-levels/second ceiling. This is the flick
+//                           cap: lower it and violent spins top out slower.
+//                           If minSpeed >= maxSpeed, minSpeed wins.
+// fluidWheelZoomSensitivity scales how far one notch travels BETWEEN those
+//                           two bounds (it cannot push past them).
+L.Map.mergeOptions({
+  // false | true (zoom about the cursor) | 'center' (zoom about map center)
+  fluidWheelZoom: false,
+  fluidWheelZoomSensitivity: 1,
+  fluidWheelZoomEase: 300,
+  fluidWheelZoomMinSpeed: 4,
+  fluidWheelZoomMaxSpeed: 7,
+});
+
+// Continuous per-frame maxBounds clamp. Same geometry as map._limitCenter,
+// minus its quantizers: _rebound rounds the correction to whole/half pixels
+// (Math.round / Math.ceil / Math.floor) and _limitCenter drops corrections
+// under 1px entirely. Both are fine for the one-shot setView calls they were
+// written for, but fed back into a per-frame glide the quantized correction
+// staircases in ~1px jumps against the smooth anchor path and the map judders
+// — and since the clamp only bites while the view exceeds the bounds, it made
+// exactly ZOOM-OUT shake while zoom-in stayed smooth. No deadband needed
+// here: the result feeds _move directly (no pan loop to destabilize), and any
+// sub-pixel residue left at moveend sits inside _panInsideMaxBounds' own 1px
+// tolerance, so no snap-back pan fires.
+function limitCenterSmooth(map, center, zoom) {
+  if (!map.options.maxBounds) return center;
+  const bounds = L.latLngBounds(map.options.maxBounds);
+  const centerPoint = map.project(center, zoom);
+  const viewHalf = map.getSize().divideBy(2);
+  const projected = L.bounds(
+    map.project(bounds.getNorthEast(), zoom),
+    map.project(bounds.getSouthWest(), zoom),
+  );
+  const minOffset = projected.min.subtract(centerPoint.subtract(viewHalf));
+  const maxOffset = projected.max.subtract(centerPoint.add(viewHalf));
+  const rebound = (left, right) => (
+    left + right > 0
+      ? (left - right) / 2                       // view can't fit: center it
+      : Math.max(0, left) - Math.max(0, right)   // push fully inside
+  );
+  const dx = rebound(minOffset.x, -maxOffset.x);
+  const dy = rebound(minOffset.y, -maxOffset.y);
+  if (dx === 0 && dy === 0) return center;
+  return map.unproject(centerPoint.add(L.point(dx, dy)), zoom);
+}
+
+if (!L.Map.FluidWheelZoom) {
+  L.Map.FluidWheelZoom = L.Handler.extend({
+    addHooks() {
+      if (this._map.scrollWheelZoom && this._map.scrollWheelZoom.enabled()) {
+        this._map.scrollWheelZoom.disable();
+      }
+      L.DomEvent.on(this._map._container, 'wheel', this._onWheelScroll, this);
+    },
+
+    removeHooks() {
+      L.DomEvent.off(this._map._container, 'wheel', this._onWheelScroll, this);
+      this._abort();
+    },
+
+    _onWheelScroll(e) {
+      if (!this._isWheeling) this._onWheelStart(e);
+      this._onWheeling(e);
+    },
+
+    _onWheelStart(e) {
+      const map = this._map;
+      // BEFORE _isWheeling is set, deliberately. _stop() now lands an
+      // in-flight fluid glide (see the prototype patch at the bottom of this
+      // file), and this call must not re-enter that for the gesture it is
+      // about to start. Ordering it first also means the anchor below is
+      // captured AFTER any CSS zoom animation settles, rather than against a
+      // camera that is about to jump.
+      map._stop();
+      if (map._panAnim) map._panAnim.stop();
+
+      this._isWheeling = true;
+      this._yielded = false;
+      this._centerPoint = map.getSize()._divideBy(2);
+      this._startLatLng = map.containerPointToLatLng(this._centerPoint);
+      this._moved = false;
+
+      this._goalZoom = map.getZoom();
+      this._prevCenter = map.getCenter();
+      this._prevZoom = map.getZoom();
+
+      // Trivial landed segment at the current zoom; the first _onWheeling
+      // retargets from it with velocity 0.
+      this._segT0 = performance.now();
+      this._segZ0 = this._goalZoom;
+      this._segV0 = 0;
+      this._segGoal = this._goalZoom;
+      this._segDur = 0;
+      this._preparedTileGoal = null;
+
+      this._zoomAnimationId = requestAnimationFrame(this._updateWheelZoom.bind(this));
+    },
+
+    _onWheeling(e) {
+      const map = this._map;
+      const opts = map.options;
+
+      const raw = L.DomEvent.getWheelDelta(e) * 0.003 * opts.fluidWheelZoomSensitivity;
+      if (raw !== 0) {
+        const cur = map.getZoom();
+        // A continuously retargeted Hermite segment cruises at 1.5·lead/T
+        // (its stable equilibrium: acceleration is zero when velocity =
+        // 1.5·(goal-zoom)/duration), so bounding the goal's lead over the
+        // live zoom pins the sustained rate into [minSpeed, maxSpeed]
+        // levels/sec regardless of what deltas the wheel hardware emits.
+        const leadPerSpeed = opts.fluidWheelZoomEase / 1500;
+        const minSpeed = Math.max(0, opts.fluidWheelZoomMinSpeed);
+        const maxSpeed = Math.max(minSpeed, opts.fluidWheelZoomMaxSpeed);
+        const dir = raw > 0 ? 1 : -1;
+
+        const goal = this._goalZoom + raw;
+        // lead measured in the direction of THIS event, so a reversal notch
+        // mid-glide bites immediately instead of shaving old momentum
+        const lead = (goal - cur) * dir;
+        const clamped = Math.min(maxSpeed * leadPerSpeed, Math.max(minSpeed * leadPerSpeed, lead));
+        let next = cur + clamped * dir;
+
+        if (next < map.getMinZoom() || next > map.getMaxZoom()) {
+          next = map._limitZoom(next);
+        }
+        this._goalZoom = next;
+
+        // Land on whole zoom levels: the segment target is the fractional
+        // intent rounded to the nearest zoomSnap increment (default 1), so
+        // the glide always comes to REST on an integer zoom — a fractional
+        // rest leaves raster tiles permanently CSS-scaled, i.e. shrunken or
+        // blurry label text. Snapped at WHEEL time so it is all one
+        // continuous motion; snapping at IDLE instead (tried, reverted)
+        // moved the map again after the wheel had stopped and read as the
+        // map acting on its own. The speed pinning above keeps `next`
+        // strictly beyond the live zoom, so the rounded target is always
+        // ahead: mid-glide a notch may be absorbed by a target already
+        // queued a level ahead, but from rest (always an integer now) one
+        // notch is exactly one level, and no notch ever reads dead or
+        // reversed.
+        const snap = (L.Browser.any3d ? map.options.zoomSnap : 1) || 1;
+        const target = Math.max(
+          map.getMinZoom(),
+          Math.min(map.getMaxZoom(), Math.round(next / snap) * snap),
+        );
+
+        // C1 retarget: the new segment starts from the glide's EXACT current
+        // zoom and velocity, so consecutive notches chain into one continuous
+        // motion instead of hitching to a fresh curve each event.
+        if (target !== this._segGoal) {
+          const now = performance.now();
+          const state = this._glideState(now);
+          this._segT0 = now;
+          this._segZ0 = state[0];
+          this._segV0 = state[1];
+          this._segGoal = target;
+          this._segDur = opts.fluidWheelZoomEase;
+        }
+      }
+
+      // Re-anchor at the cursor's CURRENT position: each tick zooms about
+      // whatever is under the mouse right now. (Keeping the gesture-start
+      // anchor would drag the map sideways along with the moving cursor.)
+      this._wheelMousePosition = map.mouseEventToContainerPoint(e);
+      this._anchorLatLng = map.containerPointToLatLng(this._wheelMousePosition);
+
+      clearTimeout(this._timeoutId);
+      this._timeoutId = setTimeout(this._onWheelIdle.bind(this), 200);
+
+      L.DomEvent.preventDefault(e);
+      L.DomEvent.stopPropagation(e);
+    },
+
+    // The wheel has been idle for a beat, but let the glide land before
+    // committing the gesture; cutting it off mid-ease reads as a hitch.
+    // Convergence is measured against _segGoal (the snapped landing target),
+    // NOT _goalZoom — that is the fractional intent accumulator, which can
+    // sit up to half a level away from where the glide actually lands, and
+    // comparing against it would keep this poller re-arming forever (gesture
+    // never commits, moveend never fires, tiles never finalize).
+    _onWheelIdle() {
+      if (!this._isWheeling) return;
+      // Yielded: the prepare below fetches tiles AROUND a center derived from
+      // the anchor, so a stale anchor would prefetch the wrong neighbourhood
+      // while a drag pans elsewhere. Cheap, and keeps the requested tiles
+      // matching where the camera is actually heading.
+      if (this._yielded) this._reanchorToLiveCamera();
+      // All notches inside this 200ms wheel burst have now been folded into
+      // one target. Preload/crossfade that level only — never every integer
+      // level crossed by a fast zoom or direction reversal.
+      if (this._preparedTileGoal !== this._segGoal) {
+        prepareGroupedTileLevel(
+          this._map,
+          this._centerAtZoom(this._segGoal),
+          this._segGoal,
+        );
+        this._preparedTileGoal = this._segGoal;
+      }
+      if (Math.abs(this._segGoal - this._map.getZoom()) > 0.002) {
+        this._timeoutId = setTimeout(this._onWheelIdle.bind(this), 50);
+        return;
+      }
+      this._finish();
+    },
+
+    _finish() {
+      // Yielded (a drag/pin-pan is moving the map): the anchor pair captured
+      // before the interrupt is stale, and both the tile prepare and the exact
+      // final _move below run through _centerAtZoom. Re-anchor to the live
+      // camera first, or committing would jerk the map off wherever the drag
+      // has put it.
+      if (this._yielded) this._reanchorToLiveCamera();
+      // Guarantee one final-level prepare even if idle raced the landing.
+      if (this._preparedTileGoal !== this._segGoal) {
+        prepareGroupedTileLevel(
+          this._map,
+          this._centerAtZoom(this._segGoal),
+          this._segGoal,
+        );
+        this._preparedTileGoal = this._segGoal;
+      }
+      this._isWheeling = false;
+      this._yielded = false;
+      cancelAnimationFrame(this._zoomAnimationId);
+      // Exact integer rest. The idle poller above accepts convergence within
+      // 0.002 — and the cancelAnimationFrame just killed the glide's final
+      // frames that would have written the exact goal. Resting at e.g. 1.9985
+      // leaves the current tile level CSS-scaled by 2^0.0015: every tile
+      // boundary lands on fractional pixels and plus-lighter renders each one
+      // as a thin bright seam (the "white lines after a fast zoom" report).
+      // One raw _move to the snapped goal: a sub-0.002-zoom nudge, invisible,
+      // no viewprereset, no tile churn — just transforms rewritten at exactly
+      // scale 1. (The integer-rest promise in the header is only real because
+      // of this line.)
+      if (this._moved && this._map.getZoom() !== this._segGoal) {
+        try {
+          this._map._move(this._centerAtZoom(this._segGoal), this._segGoal, { flyTo: true });
+        } catch (e) {}
+      }
+      this._map._moveEnd(true);
+    },
+
+    // Re-derive the zoom anchor from the camera as it is RIGHT NOW.
+    //
+    // Used only on yielded frames (a drag / pin-pan is moving the map under
+    // us). _centerAtZoom keeps `_anchorLatLng` pinned to the container point
+    // `_wheelMousePosition`; both were captured before the interrupt, so as the
+    // drag pans, that latlng is no longer under that pixel and holding the old
+    // pair would drag the map back against the user's hand. Re-reading the
+    // latlng at the same container point every frame keeps the anchor
+    // *geometrically* honest: whatever the drag has put under the cursor is
+    // what the zoom pivots on, so the two motions add instead of fighting.
+    //
+    // Also refresh _centerPoint (invalidateSize during the gesture would
+    // otherwise leave a stale half-size) and _startLatLng, which is the
+    // 'center' zoom mode's pivot.
+    _reanchorToLiveCamera() {
+      const map = this._map;
+      try {
+        this._centerPoint = map.getSize()._divideBy(2);
+        this._startLatLng = map.containerPointToLatLng(this._centerPoint);
+        if (this._wheelMousePosition) {
+          this._anchorLatLng = map.containerPointToLatLng(this._wheelMousePosition);
+        }
+      } catch (e) {
+        // Degenerate viewport mid-teardown; next frame retries.
+      }
+    },
+
+    _centerAtZoom(zoom) {
+      const map = this._map;
+      const delta = this._wheelMousePosition.subtract(this._centerPoint);
+      let center;
+      if (map.options.fluidWheelZoom === 'center' || (delta.x === 0 && delta.y === 0)) {
+        center = this._startLatLng;
+      } else {
+        center = map.unproject(map.project(this._anchorLatLng, zoom).subtract(delta), zoom);
+      }
+      return limitCenterSmooth(map, center, zoom);
+    },
+
+    // Exact [zoom, velocity(levels/ms)] of the glide at time `now`: a cubic
+    // Hermite from (_segZ0, velocity _segV0) to (_segGoal, velocity 0) over
+    // _segDur ms. Lands ON the goal with zero terminal velocity in bounded
+    // time — no asymptotic sub-pixel creep (which shimmers against Leaflet's
+    // whole-pixel transform rounding) and no constant-rate touchdown clunk.
+    // Evaluated on absolute time: a dropped or janky frame samples the same
+    // smooth curve instead of compounding integration error.
+    _glideState(now) {
+      const T = this._segDur;
+      const s = T > 0 ? (now - this._segT0) / T : 1;
+      if (s >= 1) return [this._segGoal, 0];
+      const s2 = s * s;
+      const s3 = s2 * s;
+      return [
+        (2 * s3 - 3 * s2 + 1) * this._segZ0
+          + (s3 - 2 * s2 + s) * T * this._segV0
+          + (3 * s2 - 2 * s3) * this._segGoal,
+        (6 * s2 - 6 * s) * (this._segZ0 - this._segGoal) / T
+          + (3 * s2 - 4 * s + 1) * this._segV0,
+      ];
+    },
+
+    // Dismantle the gesture without fighting whoever now owns the map.
+    //
+    // ABORT IS FOR WHEN SOMEONE ELSE OWNS THE CAMERA — it leaves the zoom
+    // wherever the glide happened to be. Never call it for user input that
+    // merely INTERRUPTS the zoom (a click, a drag): a fractional resting zoom
+    // leaves the tile level CSS-scaled, i.e. shrunken/blurry label text, and
+    // that is precisely the state `land()` exists to prevent. See the header's
+    // integer-rest promise.
+    _abort() {
+      if (!this._isWheeling) return;
+      clearTimeout(this._timeoutId);
+      cancelAnimationFrame(this._zoomAnimationId);
+      this._isWheeling = false;
+      this._yielded = false;
+      this._preparedTileGoal = null;
+      if (this._moved) {
+        this._moved = false;
+        this._map._moveEnd(true);
+      }
+    },
+
+    /**
+     * Hand the camera over WITHOUT killing the zoom: let the glide keep
+     * running to its (already integer) goal alongside whatever motion just
+     * started.
+     *
+     * History, because this has now been wrong in two directions:
+     *  - Originally an interrupt hit `_abort()` via _updateWheelZoom's
+     *    external-write guard, freezing zoom at a fraction like 3.62. The tile
+     *    level then rests CSS-scaled by 2^0.38, so labels render at ~77% of
+     *    their designed size and every tile edge sits on a fractional pixel.
+     *  - Then it called `_finish()`, which teleports to the goal in one frame.
+     *    Correct resting state, but the user sees the zoom SNAP the instant
+     *    they press the mouse ("it snaps to correct level which looks bad").
+     *
+     * Both were the same mistake: treating an interrupt as an ENDING. It isn't
+     * — the glide's target is already the snapped integer level (see
+     * _onWheeling), so the right answer is simply to let it land on its own
+     * schedule while the pan runs. Zoom and pan compose; nothing snaps and
+     * nothing rests fractional.
+     *
+     * The only thing that must change is the ABORT GUARD's reference frame:
+     * during a drag the pane moves every frame, so the guard's
+     * "did someone else move the camera" test would fire immediately. Hence
+     * _yielded — see _updateWheelZoom.
+     */
+    yieldCamera() {
+      if (!this._isWheeling || this._yielded) return;
+      // From here the glide re-derives its center from the LIVE camera each
+      // frame instead of policing it, so a concurrent drag/pin-pan composes
+      // with the zoom instead of tripping the abort guard.
+      this._yielded = true;
+      // The idle poller keeps running (it is what commits the gesture once the
+      // glide converges) — deliberately NOT cleared here.
+    },
+
+    /**
+     * FINISH the glide immediately, landing on its snapped integer goal.
+     *
+     * The hard-stop path, for when the camera genuinely must be settled in
+     * this tick: a map being torn down, or a programmatic setView/flyTo that
+     * needs a known starting state. `_finish()` already does exactly the right
+     * thing (exact _move to the snapped goal, final-level tile prepare, clean
+     * _moveEnd), so this is a guarded entry point into it.
+     *
+     * NOT for ordinary user interrupts — that is `yieldCamera()`, which keeps
+     * the motion smooth.
+     */
+    land() {
+      if (!this._isWheeling) return;
+      clearTimeout(this._timeoutId);
+      // Re-entrancy guard: _finish() calls _move + _moveEnd, and a listener on
+      // either (maxBounds enforcement is the usual suspect) can call _stop()
+      // straight back into here. _isWheeling is cleared inside _finish, but
+      // not before those fire.
+      if (this._landing) return;
+      this._landing = true;
+      try {
+        this._finish();
+      } catch (e) {
+        // Never let a landing failure strand the gesture latched — that locks
+        // zoom for the rest of the round (see _updateWheelZoom's note).
+        this._abort();
+      } finally {
+        this._landing = false;
+      }
+    },
+
+    _updateWheelZoom() {
+      const map = this._map;
+
+      // Something else (invalidateSize, setView, an animation) moved the map.
+      // Let it win, and tear the WHOLE gesture down. Just stopping the loop
+      // left _isWheeling latched: every later wheel event fed a goal nobody
+      // consumed (zoom locked forever), the idle poller re-armed eternally,
+      // and the unclosed _moveStart starved tile loading (grey flashes).
+      //
+      // SUSPENDED once we have yielded the camera (a drag or pin-pan started —
+      // see yieldCamera). The guard exists to detect an unknown owner
+      // TELEPORTING the camera; a drag legitimately moves it every frame, and
+      // policing that would abort at a fractional zoom, which is the exact bug
+      // this all started as. The gesture still ends normally via the idle
+      // poller once the glide converges.
+      if (!this._yielded
+        && (!map.getCenter().equals(this._prevCenter) || map.getZoom() !== this._prevZoom)) {
+        this._abort();
+        return;
+      }
+
+      const cur = map.getZoom();
+      const zoom = this._glideState(performance.now())[0];
+
+      if (zoom !== cur) {
+        // Keep the latlng under the cursor fixed while the zoom glides, then
+        // apply the continuous maxBounds clamp.
+        //
+        // Yielded: re-anchor to the LIVE camera first. The cursor anchor was
+        // captured before the interrupt, and a concurrent drag moves the map
+        // pane every frame — zooming about the stale anchor would fight the
+        // pan (the map would slide back under the finger). Re-deriving the
+        // anchor from the current camera each frame makes the two compose:
+        // the drag owns WHERE, the glide owns HOW FAR ZOOMED.
+        if (this._yielded) this._reanchorToLiveCamera();
+        const center = this._centerAtZoom(zoom);
+
+        if (!this._moved) {
+          map._moveStart(true, false);
+          this._moved = true;
+        }
+
+        // The flyTo tag routes GridLayer onto its ANIMATED tile path, exactly
+        // like a real flyTo frame (pinch uses {pinch:true} the same way). An
+        // untagged _move makes GridLayer._resetView treat every frame as a
+        // one-shot view change: _abortLoading (kills in-flight tile fetches),
+        // _updateLevels, _resetGrid, _update (re-queues the same fetches) and
+        // an immediate _pruneTiles — 60x/second. Zoom-in survives it because
+        // the coarse backfill is already loaded; zoom-out needs to FETCH its
+        // parent tiles, and per-frame abort+prune removed the old fine tiles
+        // before replacements could ever land — popping, grey gaps, tile
+        // density lagging the camera. The animated path defers pruning until
+        // the queued tiles finish loading (+250ms fade), so old tiles keep
+        // covering the view until the new level is actually ready.
+        map._move(center, zoom, { flyTo: true });
+        this._prevCenter = map.getCenter();
+        this._prevZoom = map.getZoom();
+      }
+
+      this._zoomAnimationId = requestAnimationFrame(this._updateWheelZoom.bind(this));
+    },
+  });
+
+  L.Map.addInitHook('addHandler', 'fluidWheelZoom', L.Map.FluidWheelZoom);
+}
+
+// Keep an in-flight fluid glide alive when something else takes the camera.
+//
+// Every motion starter funnels through Map._stop(): setView, flyTo, panTo, and
+// crucially Map.Drag._onDragStart — which Draggable fires the moment a
+// press-and-move begins. So pressing the mouse to pan mid-zoom lands here, and
+// what happens next has been wrong twice:
+//   1. abort  -> zoom froze at a fraction (CSS-scaled tiles, shrunken labels)
+//   2. land   -> zoom teleported to the goal ("snaps ... looks bad")
+// Right answer: YIELD. The glide's goal is already the snapped integer level,
+// so let it finish on its own schedule while the pan runs. The two motions
+// compose — drag owns position, glide owns zoom — and the gesture still
+// commits normally through the idle poller.
+//
+// A DRAG/PAN yields; anything that needs a settled camera in this tick (map
+// teardown, a programmatic setView that must know where it starts from) still
+// gets a hard landing. The discriminator is whether a Draggable is currently
+// active, which is exactly what Leaflet uses internally to serialize drags.
+//
+// Why here and not inside the handler: _stop() belongs to the MAP, and this is
+// the same seam lib/leafletSettleZoomAnim.js and lib/leafletGroupedZoomControls.js
+// already use for exactly this purpose (settle a CSS zoom, cancel a control
+// glide).
+//
+// PATCH-ORDER NOTE: three modules now wrap _stop (settle, control-zoom,
+// this). Each is independently idempotent and guards on its own state, and all
+// three are imported by SafeMapContainer, so the composition order does not
+// matter — but any FOURTH wrapper must keep that property.
+if (!L.Map.prototype._landsFluidZoom) {
+  L.Map.prototype._landsFluidZoom = true;
+
+  const origStop = L.Map.prototype._stop;
+  L.Map.prototype._stop = function () {
+    // Cheap guard first: this runs on every setView in the app.
+    const handler = this.fluidWheelZoom;
+    if (handler?._isWheeling) {
+      // Is a pointer drag actually in progress? Leaflet sets this static for
+      // the lifetime of any Draggable interaction (mousedown -> mouseup), and
+      // Map.Drag._onDragStart — our caller in the pan case — runs while it is
+      // set. Note it is set at MOUSEDOWN, so a click that pans a wrap copy to
+      // place a guess pin is covered too.
+      const dragging = !!L.Draggable?._dragging;
+      try {
+        if (dragging) handler.yieldCamera();
+        else handler.land();
+      } catch (e) { /* mid-teardown */ }
+    }
+    return origStop.call(this);
+  };
+}
+
+export default L.Map.FluidWheelZoom;
