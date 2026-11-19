@@ -1,0 +1,699 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
+import SiteBackground from '../src/components/SiteBackground';
+import { Pressable } from '../src/components/ui/SfxPressable';
+import Animated, { FadeInDown, FadeIn, ReduceMotion } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { haptics } from '../src/services/haptics';
+import {
+  colors,
+  t,
+  formatCompact,
+  LANGUAGE_NAMES,
+  SUPPORTED_LANGUAGES,
+  type SupportedLanguage,
+} from '../src/shared';
+import { borderRadius, fontSizes, spacing } from '../src/styles/theme';
+import { useSettingsStore, type MapType } from '../src/store/settingsStore';
+import { useAuthStore } from '../src/store/authStore';
+import { useMultiplayerStore } from '../src/store/multiplayerStore';
+import { getStrictFloor } from '../src/shared/user/leagues';
+import SegmentedControl from '../src/components/settings/SegmentedControl';
+import DangerZoneSection from '../src/components/settings/DangerZoneSection';
+import VolumeSliders from '../src/components/VolumeSliders';
+import ReviewPromptModal from '../src/components/ReviewPromptModal';
+import { useManualReviewPrompt } from '../src/hooks/useReviewPrompt';
+import { useSiteAccent } from '../src/store/siteBackgroundStore';
+import { isAdPrivacyOptionsRequired, showAdPrivacyOptions } from '../src/services/ads';
+
+const PRIVACY_URL = 'https://worldguessr.com/privacy.html';
+
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
+/** A glassmorphic settings card with a header icon + title, staggered entrance. */
+function Section({
+  title,
+  icon,
+  index,
+  children,
+}: {
+  title: string;
+  icon: IoniconName;
+  index: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <Animated.View
+      entering={FadeInDown.duration(420)
+        .delay(90 + index * 70)
+        .reduceMotion(ReduceMotion.Never)}
+      style={styles.section}
+    >
+      <View style={styles.sectionHeader}>
+        <Ionicons name={icon} size={18} color={colors.textSecondary} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      {children}
+    </Animated.View>
+  );
+}
+
+export default function SettingsScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  const units = useSettingsStore((s) => s.units);
+  const mapType = useSettingsStore((s) => s.mapType);
+  const language = useSettingsStore((s) => s.language);
+  const emotesEnabled = useSettingsStore((s) => s.multiplayerEmotesEnabled);
+  const hapticsEnabled = useSettingsStore((s) => s.hapticsEnabled);
+  const setUnits = useSettingsStore((s) => s.setUnits);
+  const setMapType = useSettingsStore((s) => s.setMapType);
+  const setLanguage = useSettingsStore((s) => s.setLanguage);
+  const setEmotesEnabled = useSettingsStore((s) => s.setMultiplayerEmotesEnabled);
+  const chatEnabled = useSettingsStore((s) => s.multiplayerChatEnabled);
+  const setChatEnabled = useSettingsStore((s) => s.setMultiplayerChatEnabled);
+  const setHapticsEnabled = useSettingsStore((s) => s.setHapticsEnabled);
+
+  // Recomputed each render so labels follow a live language switch (the screen
+  // re-renders because it subscribes to `language`).
+  const mapTypes: { value: MapType; label: string; icon: IoniconName }[] = [
+    { value: 'm', label: t('normal'), icon: 'map-outline' },
+    { value: 's', label: t('satellite'), icon: 'planet-outline' },
+    { value: 'p', label: t('terrain'), icon: 'leaf-outline' },
+    { value: 'y', label: t('hybrid'), icon: 'layers-outline' },
+  ];
+
+  // ── Account settings ────────────────────────────────────────────────────
+  // Server-backed per-account preferences — NEVER stored locally. Shown only
+  // when logged in (mirrors web settingsModal). Both values live in the
+  // multiplayer store, synced from the ws 'friends' message: the server echoes
+  // authoritative state after every write attempt (accepted or rejected), so
+  // an optimistic flip the server refused snaps back automatically.
+  const user = useAuthStore((s) => s.user);
+  const verified = useMultiplayerStore((s) => s.verified);
+  const connected = useMultiplayerStore((s) => s.connected);
+  const playerCount = useMultiplayerStore((s) => s.playerCount);
+  const allowFriendReq = useMultiplayerStore((s) => s.allowFriendReq);
+  const hideLastSeen = useMultiplayerStore((s) => s.hideLastSeen);
+  const requestFriends = useMultiplayerStore((s) => s.requestFriends);
+  const setAllowFriendReqOnServer = useMultiplayerStore((s) => s.setAllowFriendReqOnServer);
+  const setHideLastSeenOnServer = useMultiplayerStore((s) => s.setHideLastSeenOnServer);
+  const strictMatchmaking = useMultiplayerStore((s) => s.strictMatchmaking);
+  const setStrictMatchmakingOnServer = useMultiplayerStore((s) => s.setStrictMatchmakingOnServer);
+  // Voyager+ only (web settingsModal parity; the server enforces it too) —
+  // below the floor the row hides entirely rather than showing a disabled tease.
+  // getStrictFloor(), NOT leagues.voyager.min — see the web note in
+  // components/settingsModal.js. The v1 constant is 5,000 on a scale that no
+  // longer exists, so this row was hidden from everybody.
+  const strictEligible = (user?.elo ?? 0) >= getStrictFloor();
+  const [strictInfoShown, setStrictInfoShown] = useState(false);
+
+  // Hydrate both toggles. Keyed on `verified` (not just mount): a send before
+  // the socket is verified is silently dropped, and `verified` flips false on
+  // disconnect and back true after every (re)connect — so this re-fires and
+  // self-heals exactly when a retry can actually succeed, instead of polling.
+  useEffect(() => {
+    if (!user?.accountId || !verified) return;
+    requestFriends(); // hydrates both toggles in the store
+  }, [user?.accountId, verified, requestFriends]);
+
+  // Both values ride the same 'friends' message, so hideLastSeen === null is
+  // the shared "no server data yet" sentinel (web parity: settingsModal.js
+  // disables both checkboxes until accountSettings arrives). Also locked while
+  // the socket is down/unverified — a write couldn't reach the server, and the
+  // authoritative echo that confirms it could never arrive.
+  const accountSettingsLocked = !verified || hideLastSeen === null;
+
+  const pickLanguage = useCallback(
+    (lang: SupportedLanguage) => {
+      if (lang === language) return;
+      haptics.selection();
+      setLanguage(lang);
+    },
+    [language, setLanguage],
+  );
+
+  const openPrivacy = useCallback(() => {
+    Linking.openURL(PRIVACY_URL).catch(() => {});
+  }, []);
+
+  // GDPR: users in regions that require it must be able to revisit their ad
+  // consent choices (Google UMP privacy options entry point).
+  const [adPrivacyRequired, setAdPrivacyRequired] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    isAdPrivacyOptionsRequired().then((required) => {
+      if (alive) setAdPrivacyRequired(required);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Voluntary rate-us entry — same star-gated modal as the post-game prompt
+  // (1-4★ diverts to private feedback), no eligibility gating, and closing it
+  // never counts as a decline.
+  const rate = useManualReviewPrompt();
+
+  // THIS SCREEN WEARS THE EQUIPPED BACKGROUND'S COLOURS, like every other menu.
+  // The scrim, the switch tracks and the selected map tile all come from here
+  // rather than from `colors`, because a StyleSheet is built once at module load
+  // and cannot follow an equip — which is why the retinted values live inline
+  // below and the static ones stay in StyleSheet.create. With nothing equipped
+  // every one of them is the green literal it replaced.
+  const accent = useSiteAccent();
+
+  return (
+    <View style={styles.root}>
+      <SiteBackground style={StyleSheet.absoluteFill}>
+        <LinearGradient
+          colors={accent.screenWash}
+          locations={[0, 0.55, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+      </SiteBackground>
+
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        {/* Header */}
+        <Animated.View
+          entering={FadeIn.duration(320).reduceMotion(ReduceMotion.Never)}
+          style={styles.header}
+        >
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={12}
+            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+          >
+            <Ionicons name="close" size={26} color={colors.white} />
+          </Pressable>
+          <Text style={styles.headerTitle}>{t('settings')}</Text>
+          <View style={styles.backBtn} />
+        </Animated.View>
+
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: insets.bottom + spacing['3xl'] },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Audio — two sliders shared with the party-lobby sound modal
+              (one VolumeSliders component, two surfaces — web parity). First
+              section on the page per user demand. */}
+          <Section title={t('audioSettings')} icon="volume-high-outline" index={0}>
+            <VolumeSliders />
+          </Section>
+
+          {/* Units */}
+          <Section title={t('units')} icon="speedometer-outline" index={1}>
+            <SegmentedControl
+              value={units}
+              onChange={setUnits}
+              options={[
+                { value: 'metric', label: t('metric') },
+                { value: 'imperial', label: t('imperial') },
+              ]}
+            />
+          </Section>
+
+          {/* Map type */}
+          <Section title={t('mapType')} icon="map-outline" index={2}>
+            <View style={styles.tileGrid}>
+              {mapTypes.map((m) => {
+                const active = m.value === mapType;
+                return (
+                  <Pressable
+                    key={m.value}
+                    onPress={() => {
+                      if (!active) {
+                        haptics.selection();
+                        setMapType(m.value);
+                      }
+                    }}
+                    style={({ pressed }) => [
+                      styles.tile,
+                      // The selected tile's fill AND rim follow the equipped
+                      // background. The rim used to be colors.success, which is
+                      // the "on" green — but the tick below already says
+                      // selected, so the rim was chrome wearing a status colour,
+                      // and left alone it would have put a lime border around a
+                      // purple tile. The tick itself stays green.
+                      active && { backgroundColor: accent.primaryTransparent, borderColor: accent.primary },
+                      pressed && styles.tilePressed,
+                    ]}
+                  >
+                    <Ionicons
+                      name={m.icon}
+                      size={22}
+                      color={active ? colors.white : colors.textSecondary}
+                    />
+                    <Text style={[styles.tileLabel, active && styles.tileLabelActive]}>
+                      {m.label}
+                    </Text>
+                    {active && (
+                      <View style={styles.tileCheck}>
+                        <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+                      </View>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Section>
+
+          {/* Language */}
+          <Section title={t('language')} icon="language-outline" index={3}>
+            <View style={styles.list}>
+              {SUPPORTED_LANGUAGES.map((lang, i) => {
+                const active = lang === language;
+                return (
+                  <Pressable
+                    key={lang}
+                    onPress={() => pickLanguage(lang)}
+                    style={({ pressed }) => [
+                      styles.row,
+                      i > 0 && styles.rowDivider,
+                      pressed && styles.rowPressed,
+                    ]}
+                  >
+                    <Text style={[styles.rowLabel, active && styles.rowLabelActive]}>
+                      {LANGUAGE_NAMES[lang]}
+                    </Text>
+                    {active ? (
+                      <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+                    ) : (
+                      <View style={styles.radioEmpty} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Section>
+
+          {/* Multiplayer */}
+          <Section title={t('multiplayer')} icon="happy-outline" index={4}>
+            <View style={styles.row}>
+              <View style={styles.rowTextWrap}>
+                <Text style={styles.rowLabel}>
+                  {t('emoteReactions')}
+                </Text>
+                <Text style={styles.rowSub}>
+                  {t(
+                    'emoteReactionsDesc',
+                    undefined,
+                    'Show emoji reactions from other players during multiplayer games.',
+                  )}
+                </Text>
+              </View>
+              <Switch
+                value={emotesEnabled}
+                onValueChange={(v) => {
+                  haptics.selection();
+                  setEmotesEnabled(v);
+                }}
+                trackColor={{ false: 'rgba(255,255,255,0.18)', true: accent.primary }}
+                thumbColor={colors.white}
+                ios_backgroundColor="rgba(255,255,255,0.18)"
+              />
+            </View>
+            <View style={[styles.row, styles.rowDivider]}>
+              <View style={styles.rowTextWrap}>
+                <Text style={styles.rowLabel}>
+                  {t('multiplayerChat')}
+                </Text>
+                <Text style={styles.rowSub}>
+                  {t(
+                    'chatSettingDesc',
+                    undefined,
+                    'Show text chat in parties and team games.',
+                  )}
+                </Text>
+              </View>
+              <Switch
+                value={chatEnabled}
+                onValueChange={(v) => {
+                  haptics.selection();
+                  setChatEnabled(v);
+                }}
+                trackColor={{ false: 'rgba(255,255,255,0.18)', true: accent.primary }}
+                thumbColor={colors.white}
+                ios_backgroundColor="rgba(255,255,255,0.18)"
+              />
+            </View>
+          </Section>
+
+          {/* Haptics */}
+          <Section title={t('haptics')} icon="phone-portrait-outline" index={5}>
+            <View style={styles.row}>
+              <View style={styles.rowTextWrap}>
+                <Text style={styles.rowLabel}>
+                  {t('hapticFeedback')}
+                </Text>
+                <Text style={styles.rowSub}>
+                  {t(
+                    'hapticFeedbackDesc',
+                    undefined,
+                    'Vibrate on guesses, results, and other interactions.',
+                  )}
+                </Text>
+              </View>
+              <Switch
+                value={hapticsEnabled}
+                onValueChange={(v) => {
+                  // Set first, then tick: turning ON confirms with a buzz, turning
+                  // OFF is silent (the helper is already gated).
+                  setHapticsEnabled(v);
+                  haptics.selection();
+                }}
+                trackColor={{ false: 'rgba(255,255,255,0.18)', true: accent.primary }}
+                thumbColor={colors.white}
+                ios_backgroundColor="rgba(255,255,255,0.18)"
+              />
+            </View>
+          </Section>
+
+          {/* Account — server-backed, logged-in only */}
+          {user?.accountId && (
+            <Section title={t('accountSettings')} icon="person-circle-outline" index={6}>
+              <View style={[styles.row, accountSettingsLocked && styles.rowLocked]}>
+                <View style={styles.rowTextWrap}>
+                  <Text style={styles.rowLabel}>{t('allowFriendRequests')}</Text>
+                </View>
+                <Switch
+                  value={allowFriendReq}
+                  disabled={accountSettingsLocked}
+                  onValueChange={(v) => {
+                    haptics.selection();
+                    setAllowFriendReqOnServer(v);
+                  }}
+                  trackColor={{ false: 'rgba(255,255,255,0.18)', true: accent.primary }}
+                  thumbColor={colors.white}
+                  ios_backgroundColor="rgba(255,255,255,0.18)"
+                />
+              </View>
+              <View style={[styles.row, styles.rowDivider, accountSettingsLocked && styles.rowLocked]}>
+                <View style={styles.rowTextWrap}>
+                  <Text style={styles.rowLabel}>{t('hideMyLastSeen')}</Text>
+                </View>
+                <Switch
+                  value={!!hideLastSeen}
+                  disabled={accountSettingsLocked}
+                  onValueChange={(v) => {
+                    haptics.selection();
+                    setHideLastSeenOnServer(v); // optimistic in the store; echo reconciles
+                  }}
+                  trackColor={{ false: 'rgba(255,255,255,0.18)', true: accent.primary }}
+                  thumbColor={colors.white}
+                  ios_backgroundColor="rgba(255,255,255,0.18)"
+                />
+              </View>
+              {strictEligible && (
+              <>
+              <View style={[styles.row, styles.rowDivider, accountSettingsLocked && styles.rowLocked]}>
+                <View style={[styles.rowTextWrap, styles.rowLabelWithInfo]}>
+                  <Text style={styles.rowLabel}>{t('strictMatchmaking')}</Text>
+                  <Pressable hitSlop={8} onPress={() => setStrictInfoShown((v) => !v)}>
+                    <Ionicons name="information-circle-outline" size={18} color="rgba(255,255,255,0.55)" />
+                  </Pressable>
+                </View>
+                <Switch
+                  value={!!strictMatchmaking}
+                  disabled={accountSettingsLocked}
+                  onValueChange={(v) => {
+                    haptics.selection();
+                    setStrictMatchmakingOnServer(v); // optimistic in the store; echo reconciles
+                  }}
+                  trackColor={{ false: 'rgba(255,255,255,0.18)', true: accent.primary }}
+                  thumbColor={colors.white}
+                  ios_backgroundColor="rgba(255,255,255,0.18)"
+                />
+              </View>
+              {strictInfoShown && (
+                <View style={styles.infoCard}>
+                  <Text style={styles.infoCardText}>
+                    {t('strictMatchmakingHint')}
+                  </Text>
+                </View>
+              )}
+              </>
+              )}
+            </Section>
+          )}
+
+          {/* NO SHOP SECTION HERE. The shop is reached from the Stamps button
+              beside the league pill on the home header (app/(tabs)/home.tsx),
+              which is where the balance already lives. The row that used to sit
+              here was a stopgap from before that button existed; a storefront
+              buried three taps deep inside Settings is a storefront nobody
+              opens. The route (/shop) is unchanged. */}
+
+          {/* Danger Zone — account deletion (moved here from the account
+              moderation tab; web parity: sits right under Account settings) */}
+          {user?.accountId && (
+            <Section title={t('dangerZone')} icon="warning-outline" index={7}>
+              <DangerZoneSection />
+            </Section>
+          )}
+
+          {/* About */}
+          <Section title={t('about')} icon="shield-checkmark-outline" index={8}>
+            <Pressable
+              onPress={rate.open}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+            >
+              <Text style={styles.rowLabel}>
+                {t('rateUs')}
+              </Text>
+              <Ionicons name="star-outline" size={20} color={colors.textMuted} />
+            </Pressable>
+            <Pressable
+              onPress={openPrivacy}
+              style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.rowPressed]}
+            >
+              <Text style={styles.rowLabel}>
+                {t('termsAndPrivacy')}
+              </Text>
+              <Ionicons name="open-outline" size={20} color={colors.textMuted} />
+            </Pressable>
+            {adPrivacyRequired && (
+              <Pressable
+                onPress={showAdPrivacyOptions}
+                style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.rowPressed]}
+              >
+                <Text style={styles.rowLabel}>
+                  {t('adPrivacyChoices')}
+                </Text>
+                <Ionicons name="options-outline" size={20} color={colors.textMuted} />
+              </Pressable>
+            )}
+            {/* Live player count — moved here from the home footer (Aug 23):
+                a status readout is settings material, not home chrome. Rendered
+                only while the socket is live so it can never show a stale 0. */}
+            {connected && playerCount > 0 && (
+              <View style={[styles.row, styles.rowDivider]}>
+                <Text style={styles.rowLabel}>
+                  {t('onlineCnt', { cnt: formatCompact(playerCount) })}
+                </Text>
+                <View style={styles.onlineDot} />
+              </View>
+            )}
+          </Section>
+        </ScrollView>
+
+      </SafeAreaView>
+      {/* Outside the SafeAreaView so the inline overlay's dim covers the
+          status-bar inset too (it is no longer a native Modal). */}
+      <ReviewPromptModal
+        visible={rate.visible}
+        onRate={rate.onRate}
+        onDismiss={rate.onDismiss}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  safe: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backBtnPressed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  headerTitle: {
+    fontFamily: 'JockeyOne',
+    fontSize: fontSizes['3xl'],
+    color: colors.white,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
+  },
+  section: {
+    backgroundColor: 'rgba(36, 87, 52, 0.42)',
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 6,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  sectionTitle: {
+    fontFamily: 'Lexend-SemiBold',
+    fontSize: fontSizes.md,
+    color: colors.white,
+    letterSpacing: 0.3,
+  },
+  // Map type tiles
+  tileGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  tile: {
+    width: '48%',
+    flexGrow: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.lg,
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  /* tileActive is GONE from here: both of its properties follow the equipped
+     background now, and a StyleSheet is frozen at module load. See the inline
+     object at the Pressable above. */
+  tilePressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
+  },
+  tileLabel: {
+    fontFamily: 'Lexend-Medium',
+    fontSize: fontSizes.sm,
+    color: colors.textSecondary,
+    flexShrink: 1,
+  },
+  tileLabelActive: {
+    color: colors.white,
+  },
+  tileCheck: {
+    marginLeft: 'auto',
+  },
+  // Lists / rows
+  list: {},
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md - 2,
+    gap: spacing.md,
+  },
+  rowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  // Presence dot beside the live player count.
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#5cba60',
+  },
+  rowPressed: {
+    opacity: 0.7,
+  },
+  // Account rows grey out while the socket is unverified / toggles unhydrated
+  // (writes couldn't reach the server, so changes are blocked at the Switch).
+  rowLocked: {
+    opacity: 0.45,
+  },
+  rowTextWrap: {
+    flex: 1,
+    paddingRight: spacing.sm,
+  },
+  rowLabel: {
+    fontFamily: 'Lexend-Medium',
+    fontSize: fontSizes.md,
+    color: colors.textSecondary,
+  },
+  rowLabelActive: {
+    color: colors.white,
+    fontFamily: 'Lexend-SemiBold',
+  },
+  rowSub: {
+    fontFamily: 'Lexend',
+    fontSize: fontSizes.xs,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: fontSizes.xs * 1.4,
+  },
+  // Label + inline info glyph on one line (strict matchmaking row).
+  rowLabelWithInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  // Tap-to-unfold explanation card under a settings row (the ⓘ toggles it).
+  infoCard: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 2,
+    marginBottom: 10,
+  },
+  infoCardText: {
+    fontFamily: 'Lexend',
+    fontSize: fontSizes.sm,
+    color: colors.textMuted,
+    lineHeight: fontSizes.sm * 1.45,
+  },
+  radioEmpty: {
+    width: 22,
+    height: 22,
+    borderRadius: borderRadius.full,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+  },
+});
