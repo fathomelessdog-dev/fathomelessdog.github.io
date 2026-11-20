@@ -1,0 +1,204 @@
+import { memo, useEffect, useRef, useState } from "react";
+import { rampQue, shouldCountPageView, sweepVideoUnits } from "./utils/playwire";
+import sendEvent from "./utils/sendEvent";
+
+// Nitro-style slot lifecycle: WE pick the creative size client-side from
+// viewport fit and mount/unmount per screen — RAMP's device detection is
+// not used. CK (Aug 3, second config): selector
+// targeting removed, selectorId is the only binding, and each size is its
+// own unit, all-devices:
+const UNIT_FOR_SIZE = {
+  "320x50": "standard_iab_head1",
+  "728x90": "standard_iab_head2",
+  "300x250": "standard_iab_cntr1",
+};
+
+// Hard-won rules from the Aug 2-3 integration saga — the "why" behind this
+// file's minimalism. Break them and ads go permanently blank:
+//
+// 1. NEVER call destroyUnits, and NEVER clear the container's innerHTML in
+//    cleanup. Each mount declares the full layout with spaAds; RAMP's own
+//    internal destroy+re-init handles whatever ran before. Manual teardown
+//    poisoned later re-inits of the destroyed unit (tag created, no fetch,
+//    blank forever).
+// 2. NO manual googletag/triggerRefresh calls — CK explicitly (Aug 3):
+//    manual refreshes "can cause issues", remove them. The units' Auto/30s
+//    refresh is config-side. If fetching or refreshing ever breaks again,
+//    it's a CONFIG problem — the Aug 3 stall's root cause was a lazyLoad
+//    rule on cntr1 that waited for a SCROLL event (a full-screen game never
+//    scrolls); CK removed it. Report to CK, do not re-add workarounds.
+// 3. Injection ids are per-DECLARE (`selectorId-<n>`, stamped on the live
+//    div right before each spaAds): pageos can cache the container element
+//    it resolved for an id, and ANY re-declare reusing an id — a remount,
+//    OR the same instance flipping size after a null-render spell — can
+//    land the new tag in a stale/detached div. Minting the id inside the
+//    declare itself covers every path. Cheap, keep it.
+
+// Largest type that fits: width within 90% of the screen, height within
+// vertThresh of it. Later entries win — order sizes smallest → largest.
+function findAdType(screenW, screenH, types, vertThresh) {
+  let type = 0;
+  for (let i = 0; i < types.length; i++) {
+    if (types[i][0] <= screenW * 0.9 && types[i][1] <= screenH * vertThresh) {
+      type = i;
+    }
+  }
+
+  if (types[type][0] > screenW || types[type][1] > screenH * vertThresh)
+    return -1;
+
+  return type;
+}
+
+let mountSeq = 0;
+
+function PlaywireAd({
+  types,          // [[w,h], ...] — must all exist in UNIT_FOR_SIZE
+  selectorId,     // base for the per-mount injection id
+  vertThresh = 0.3,
+  screenW,
+  screenH,
+  showAdvertisementText = true,
+}) {
+  const [isClient, setIsClient] = useState(false); // false | true | "debug"
+  const adDivRef = useRef(null);
+
+  useEffect(() => {
+    // ?pwtest forces real injection on localhost (wiring checks through a
+    // tunnel / against house ads without deploying).
+    const debug =
+      window.location.hostname === "localhost" &&
+      !window.location.search.includes("pwtest");
+    setIsClient(debug ? "debug" : true);
+  }, []);
+
+  const typeIdx = findAdType(screenW, screenH, types, vertThresh);
+  const size = typeIdx === -1 ? null : types[typeIdx];
+  const unitType = size ? UNIT_FOR_SIZE[`${size[0]}x${size[1]}`] : null;
+
+  useEffect(() => {
+    if (!unitType || !isClient || isClient === "debug") return;
+
+    // The call runs through ramp.que, which can fire long after mount (the
+    // stack loads on first interaction) — a slot that unmounted or resized
+    // to a different unit in the meantime must not declare a stale layout.
+    let alive = true;
+
+    rampQue(() => {
+      if (!alive || !adDivRef.current) return;
+      try {
+        // Fresh id per declare, stamped on the live div first (header
+        // rule 3) — pageos then resolves the id to THIS element, never a
+        // cached stale one.
+        const injectionId = `${selectorId}-${++mountSeq}`;
+        adDivRef.current.id = injectionId;
+        // Declare the current ad layout: spaAds destroys whatever ran
+        // before and loads exactly this list. countPageView only on the
+        // session's FIRST call — slot mounts fire on every screen hop /
+        // round remount / resize, and counting each would inflate
+        // pageviews (see shouldCountPageView in utils/playwire.js).
+        const countPageView = shouldCountPageView();
+        window.ramp.spaAds({
+          ads: [{ type: unitType, selectorId: injectionId }],
+          countPageView,
+        });
+        sendEvent(`ad_request_${size[0]}x${size[1]}_${unitType}`);
+      } catch (e) {}
+    });
+    // Queued AFTER the declare (own que entry, so it runs post-spaAds
+    // whether RAMP is booted or not): a re-declare is when config-side
+    // auto units (corner_ad_video) could resurface — evict them again.
+    sweepVideoUnits();
+
+    return () => {
+      // The flag and NOTHING else — see the header rules.
+      alive = false;
+    };
+  }, [unitType, isClient, selectorId]);
+
+  if (!size || !unitType || !isClient) return null;
+
+  return (
+    <div
+      className={`playwire-ad-slot${isClient === "debug" ? " pw-debug" : ""}`}
+      style={{
+        position: "relative",
+        display: "inline-block",
+      }}
+    >
+      {showAdvertisementText && (
+        <span
+          style={{
+            position: "absolute",
+            top: "-24px",
+            left: "0px",
+            padding: "0 5px",
+            fontSize: "18px",
+            fontWeight: "bold",
+          }}
+        >
+          Advertisement
+        </span>
+      )}
+      {/* key={unitType}: a size flip tears the old injection div (and the
+          previous creative's iframe) out of the DOM instead of stacking the
+          new tag beside it — same sanctioned teardown as a screen change.
+          The id lands imperatively in the effect, per declare. */}
+      <div
+        key={unitType}
+        style={{
+          backgroundColor: `rgba(0,0,0,${isClient === "debug" ? 0.5 : 0})`,
+          height: size[1],
+          width: size[0],
+          textAlign: "center",
+          position: "relative",
+        }}
+        ref={adDivRef}
+      >
+        {isClient === "debug" && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: "10px",
+              left: "0",
+              width: "100%",
+              color: "white",
+              zIndex: 2,
+              backgroundColor: `rgba(0, 0, 0, 0.5)`,
+            }}
+          >
+            <h3>Banner Ad Here (Playwire)</h3>
+            <p style={{ fontSize: "0.8em" }}>
+              {size[0]}x{size[1]}
+            </p>
+            <p style={{ fontSize: "0.6em" }}>Unit: {unitType}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// gameUI re-renders constantly during play (timers, HUD state) with this
+// slot in its tree; every prop is a scalar except `types`, a fresh array
+// literal each parent render — compare its entries, not its identity, so
+// the ad subtree drops out of every gameplay commit entirely.
+function propsEqual(a, b) {
+  if (
+    a.selectorId !== b.selectorId ||
+    a.screenW !== b.screenW ||
+    a.screenH !== b.screenH ||
+    a.vertThresh !== b.vertThresh ||
+    a.showAdvertisementText !== b.showAdvertisementText
+  )
+    return false;
+  if (a.types === b.types) return true;
+  if (!a.types || !b.types || a.types.length !== b.types.length) return false;
+  for (let i = 0; i < a.types.length; i++) {
+    if (a.types[i][0] !== b.types[i][0] || a.types[i][1] !== b.types[i][1])
+      return false;
+  }
+  return true;
+}
+
+export default memo(PlaywireAd, propsEqual);

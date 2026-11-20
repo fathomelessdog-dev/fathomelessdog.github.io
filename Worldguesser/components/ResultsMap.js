@@ -1,0 +1,557 @@
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import dynamic from 'next/dynamic';
+import { Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { useTranslation } from '@/components/useTranslations';
+import { getPinIcons, markerSkinIconKey } from '@/lib/markerIcons';
+import { findDistance, pickBestTeamGuessIds } from './calcPoints';
+import 'leaflet/dist/leaflet.css';
+import SafeMapContainer from './SafeMapContainer';
+import openInStreetView from './utils/openInStreetView';
+import { cachedNameGlowProps, GLOW_LIGHT } from './utils/usernameWithFlag';
+import GuessPinLabel from './utils/guessPinLabel';
+import { fitBoundsAtWholeZoom, flyToBoundsAtWholeZoom } from '@/lib/leafletWholeZoom';
+import { googleTileScale } from '@/lib/googleTileScale';
+
+// Reusable all-rounds results Leaflet map, lifted verbatim from the desktop
+// MapContainer block in components/roundOverScreen.js so the mobile WebView
+// (via /embed/results) reuses the exact web map. MapContainer/TileLayer touch
+// window (Leaflet) → client-only, dynamically imported with ssr:false exactly
+// like roundOverScreen.js. MapContainer is error-boundaried (SafeMapContainer)
+// so a partial leaflet load can't white-screen the app.
+const MapContainer = SafeMapContainer;
+const TileLayer = dynamic(
+  () => import("react-leaflet").then((module) => module.TileLayer),
+  { ssr: false }
+);
+
+// Lifted from roundOverScreen.js: stores the map ref, fires onMapReady, and
+// reports user-initiated pan/zoom so callers can stop auto-fitting.
+const MapEvents = ({ mapRef, onMapReady, onUserInteraction }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (map && !mapRef.current) {
+      mapRef.current = map;
+      onMapReady(true);
+
+      // Force resize after creation
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 100);
+    }
+  }, [map, mapRef, onMapReady]);
+
+  // Listen for user-initiated map interactions
+  useEffect(() => {
+    if (map && onUserInteraction) {
+      const handleUserInteraction = () => {
+        onUserInteraction();
+      };
+
+      // Listen for zoom and pan events initiated by user
+      map.on('zoomstart', handleUserInteraction);
+      map.on('movestart', handleUserInteraction);
+      map.on('dragstart', handleUserInteraction);
+
+      return () => {
+        map.off('zoomstart', handleUserInteraction);
+        map.off('movestart', handleUserInteraction);
+        map.off('dragstart', handleUserInteraction);
+      };
+    }
+  }, [map, onUserInteraction]);
+
+  return null;
+};
+
+// --- Helpers lifted verbatim from roundOverScreen.js ---
+
+const getPointsColor = (points) => {
+  if (points >= 3000) return '#4CAF50';
+  if (points >= 1500) return '#FFC107';
+  return '#F44336';
+};
+
+const getOptimalZoom = (distance) => {
+  if (distance < 1) return 15;
+  if (distance < 5) return 13;
+  if (distance < 25) return 11;
+  if (distance < 100) return 9;
+  if (distance < 500) return 7;
+  if (distance < 2000) return 5;
+  return 3;
+};
+
+// Green for the current player, deterministic palette for everyone else.
+const getPlayerColor = (playerId, isMyId) => {
+  if (isMyId) return '#4CAF50';
+  const colors = ['#F44336', '#2196F3', '#FF9800', '#9C27B0', '#00BCD4'];
+  const hash = playerId.split('').reduce((a, b) => {
+    a = ((a << 5) - a) + b.charCodeAt(0);
+    return a & a;
+  }, 0);
+  return colors[Math.abs(hash) % colors.length];
+};
+
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+export default function ResultsMap({
+  rounds,
+  activeRound = null,
+  myId = null,
+  // Equipped pin sku for the CURRENT player. Their own guess is drawn from
+  // round.guessLat/Long rather than from round.players, so unlike everyone
+  // else's skin it cannot be read off a guess entry. Multiplayer still resolves
+  // it from round.players[myId] when present; this prop is what covers
+  // singleplayer, where there is no players map at all.
+  myMarkerSkin = null,
+  // NO `myNameGlow` COUNTERPART, and the asymmetry with myMarkerSkin above is
+  // the point. A skin dresses your PIN, which is identity — you have to be able
+  // to pick yours out of five. A glow dresses a NAME, and your own pin's label
+  // is not a name: it reads "Your guess". So opponents' labels glow off their
+  // round.players entry and yours never does. This prop existed for one render
+  // and was deleted with it.
+  // Highlighted player from the Final Scores list. When set, only that player's
+  // guesses render (the current player's always do, separately), so the two can
+  // be compared; selecting yourself matches no opponent, hiding them all. Unset
+  // (web / no selection) → no filtering, original behavior.
+  selectedPlayer = null,
+  isDuel = false,
+  // Team games: map of playerId -> 'a' | 'b'. Teammates render with the blue
+  // (your) pin, enemies green, and each team's closest guesser per round gets
+  // the enlarged pin AND is the only one whose guess→dest line draws (best-
+  // guess modes only — don't pass teams for average-scoring parties). null →
+  // solo/1v1 behavior unchanged.
+  teams = null,
+  isCountryGuesser = false,
+  lang = 'en',
+  mapType = 'm',
+  onUserInteraction,
+  onOpenMaps,
+}) {
+  const { t: text } = useTranslation();
+
+  const [leafletReady, setLeafletReady] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
+  const [userHasInteracted, setUserHasInteracted] = useState(false);
+  const mapRef = useRef(null);
+  const destIconRef = useRef(null);
+  const srcIconRef = useRef(null);
+  const src2IconRef = useRef(null);
+  const srcBigIconRef = useRef(null);
+  const src2BigIconRef = useRef(null);
+  const allIconsRef = useRef(null);
+
+  const finalHistory = useMemo(() => (Array.isArray(rounds) ? rounds : []), [rounds]);
+
+  // Team context (see `teams` prop). Same semantics as roundOverScreen.
+  const myTeam = teams && myId != null ? teams[myId] : null;
+  const isMyTeammate = (playerId) => myTeam != null && teams?.[playerId] === myTeam;
+  // Points-first, exact point ties broken by raw distance — only ONE pin per
+  // team enlarges + draws its line (mirrors roundOverScreen's
+  // bestTeamGuesserIds and the Map.js live reveal).
+  const bestTeamGuesserIds = (round) => {
+    if (!teams) return null;
+    const entries = [];
+    const consider = (id, pts, lat, lng) => {
+      const team = teams[id];
+      if (!team) return;
+      entries.push({
+        id, team, pts,
+        dist: (round.lat != null && lat != null)
+          ? findDistance(round.lat, round.long, lat, lng)
+          : Infinity,
+      });
+    };
+    Object.entries(round.players || {}).forEach(([id, p]) => consider(id, p?.points || 0, p?.lat, p?.long));
+    if (myId != null) consider(myId, round.points || 0, round.guessLat, round.guessLong);
+    return pickBestTeamGuessIds(entries);
+  };
+
+  // Initialize Leaflet icons from shared cache (icons created once globally).
+  // Lifted from roundOverScreen.js.
+  useEffect(() => {
+    let timer = null;
+    let attempts = 0;
+    let cancelled = false;
+    const checkLeaflet = () => {
+      if (cancelled) return;
+      const icons = getPinIcons();
+      if (icons) {
+        destIconRef.current = icons.dest;
+        srcIconRef.current = icons.src;
+        src2IconRef.current = icons.src2;
+        srcBigIconRef.current = icons.srcBig;
+        src2BigIconRef.current = icons.src2Big;
+        // Whole set kept so a purchased pin sku resolves by key, same as
+        // components/Map.js. `markerSkin` rides on the round's player entry
+        // exactly like `nameGlow` does.
+        allIconsRef.current = icons;
+        setLeafletReady(true);
+        return;
+      }
+      // Fast for ~2s, then a 500ms tail that never gives up (hidden-tab timer
+      // clamping can outlast any cap — see roundOverScreen.js, keep in sync).
+      // The leak fix is the unmount cleanup below, not a cap.
+      timer = setTimeout(checkLeaflet, ++attempts < 20 ? 100 : 500);
+    };
+
+    checkLeaflet();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, []);
+
+  // Open external maps via the host (mobile hands it to the OS); fall back to
+  // window.open when no onOpenMaps is provided (plain web / iframe use).
+  const openMaps = (lat, lng, panoId = null) => {
+    if (typeof onOpenMaps === 'function') {
+      onOpenMaps({ lat, lng, panoId });
+      return;
+    }
+    // Was a bare window.open with no embedded-portal check, so on
+    // CrazyGames/Poki/GameDistribution the button silently did nothing. The
+    // shared helper copies the link there instead.
+    openInStreetView({ lat, lng, panoId });
+  };
+
+  const handleUserInteraction = () => {
+    setUserHasInteracted(true);
+    if (typeof onUserInteraction === 'function') onUserInteraction();
+  };
+
+  // Fit the map to every round location + every guess. Lifted from roundOverScreen.js.
+  const fitMapToBounds = () => {
+    if (!mapRef.current || !finalHistory.length || !window.L) {
+      return;
+    }
+
+    const map = mapRef.current;
+    const bounds = window.L.latLngBounds();
+
+    finalHistory.forEach(round => {
+      bounds.extend([round.lat, round.long]);
+      if (round.guessLat && round.guessLong) {
+        bounds.extend([round.guessLat, round.guessLong]);
+      }
+      // Add other players' guesses if available
+      if (round.players) {
+        Object.values(round.players).forEach(player => {
+          if (player.lat && player.long) {
+            bounds.extend([player.lat, player.long]);
+          }
+        });
+      }
+    });
+
+    try {
+      if (bounds.isValid()) {
+        // Fit once, but keep the resting raster tile level integral.
+        fitBoundsAtWholeZoom(map, bounds, { padding: [20, 20] });
+      }
+    } catch (error) {
+      console.error('Error fitting map to bounds:', error);
+    }
+  };
+
+  // Fly to a single round (guess + actual + opponents). Lifted from roundOverScreen.js.
+  const focusOnRound = (roundIndex) => {
+    if (!mapRef.current || !finalHistory[roundIndex] || !window.L) {
+      return;
+    }
+
+    const round = finalHistory[roundIndex];
+    const map = mapRef.current;
+
+    if (round.guessLat && round.guessLong) {
+      const distance = calculateDistance(round.lat, round.long, round.guessLat, round.guessLong);
+      const optimalZoom = getOptimalZoom(distance);
+
+      const bounds = window.L.latLngBounds([
+        [round.lat, round.long],
+        [round.guessLat, round.guessLong]
+      ]);
+
+      // Add other players' guesses to bounds if available
+      if (round.players) {
+        Object.values(round.players).forEach(player => {
+          if (player.lat && player.long) {
+            bounds.extend([player.lat, player.long]);
+          }
+        });
+      }
+
+      // Preserve the smooth flight while landing at native raster scale.
+      flyToBoundsAtWholeZoom(map, bounds, {
+        padding: [50, 50],
+        maxZoom: optimalZoom,
+        duration: 1.5,
+        easeLinearity: 0.25
+      });
+    } else {
+      // Just center on the target location without locking
+      map.flyTo([round.lat, round.long], 10, {
+        duration: 1.5,
+        easeLinearity: 0.25
+      });
+    }
+  };
+
+  // Camera control: focus the active round, or fit all when none. Fit on first
+  // ready too. Stops auto-fitting once the user pans (same as roundOverScreen,
+  // but only for the fit-all case so explicit round taps always animate).
+  useEffect(() => {
+    if (!mapReady || !leafletReady || !finalHistory.length) return;
+    if (typeof activeRound === 'number') {
+      const id = setTimeout(() => focusOnRound(activeRound), 50);
+      return () => clearTimeout(id);
+    }
+    if (!userHasInteracted) {
+      const id = setTimeout(() => fitMapToBounds(), 200);
+      return () => clearTimeout(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, leafletReady, activeRound, userHasInteracted]);
+
+  // Compute the map's initial bounds up front so MapContainer mounts already
+  // fitted — no [0,0]/zoom-2 world-map flash. Lifted from roundOverScreen.js.
+  const initialBounds = useMemo(() => {
+    if (typeof window === 'undefined' || !window.L || !finalHistory?.length) {
+      return null;
+    }
+    const b = window.L.latLngBounds();
+    finalHistory.forEach((round) => {
+      if (round.lat != null && round.long != null) b.extend([round.lat, round.long]);
+      if (round.guessLat != null && round.guessLong != null) b.extend([round.guessLat, round.guessLong]);
+      if (round.players) {
+        Object.values(round.players).forEach((p) => {
+          if (p.lat != null && p.long != null) b.extend([p.lat, p.long]);
+        });
+      }
+    });
+    return b.isValid() ? b : null;
+  }, [finalHistory, leafletReady]);
+
+  // Don't render until Leaflet + icons are ready (mirrors roundOverScreen.js).
+  if (!leafletReady || !destIconRef.current || !srcIconRef.current || !src2IconRef.current) {
+    return null;
+  }
+
+  const tileScale = googleTileScale();
+
+  return (
+    <MapContainer
+      {...(initialBounds
+        ? { bounds: initialBounds, boundsOptions: { padding: [20, 20] } }
+        : { center: [0, 0], zoom: 2 })}
+      minZoom={1}
+      maxZoom={18}
+      zoomSnap={1}
+      fadeAnimation={true}
+      worldCopyJump={false}
+      zoomControl={false}
+      style={{ height: "100%", width: "100%" }}
+    >
+      <MapEvents
+        mapRef={mapRef}
+        onMapReady={setMapReady}
+        onUserInteraction={handleUserInteraction}
+      />
+
+      <TileLayer
+        url={`https://mt{s}.google.com/vt/lyrs=${mapType || 'm'}&x={x}&y={y}&z={z}&hl=${lang}&scale=${tileScale}`}
+        subdomains={['0', '1', '2', '3']}
+        maxZoom={22}
+        updateWhenZooming={false}
+      />
+
+      {finalHistory.map((round, index) => {
+        // Show every round's destination by default; once a round is highlighted,
+        // collapse to only that round so the map isn't a tangle of pins and lines.
+        const shouldShowDestination = activeRound === null || activeRound === index;
+        // Team games: each team's closest guesser gets the enlarged pin.
+        const bestIds = bestTeamGuesserIds(round);
+        // Permanent name labels only while something is HIGHLIGHTED — a focused
+        // round, or a player picked out of the Final Scores list. Labelling all
+        // rounds at once buries the pins under a wall of white boxes. See
+        // components/utils/guessPinLabel.js for why the labels exist at all
+        // (marker skins killed the blue-you / green-them colour read).
+        const showLabels = activeRound === index || !!selectedPlayer;
+
+        return (
+          <React.Fragment key={index}>
+            {/* Target location */}
+            {shouldShowDestination && (
+              <Marker
+                position={[round.lat, round.long]}
+                icon={destIconRef.current}
+              >
+                <Popup>
+                  <div>
+                    <strong>{text("roundNo", { r: index + 1 })}</strong><br />
+                    {text("actualLocation")}
+                    <div style={{ marginTop: '8px' }}>
+                      <button
+                        onClick={() => openMaps(round.lat, round.long, round.panoId)}
+                        style={{
+                          background: '#4285f4',
+                          color: 'white',
+                          border: 'none',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '12px'
+                        }}
+                      >
+                        🗺️ {text("openInMaps")}
+                      </button>
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
+            )}
+
+            {/* Current player's guess */}
+            {round.guessLat && round.guessLong && (() => {
+              const shouldShowPlayerGuess = activeRound === null || activeRound === index;
+
+              if (!shouldShowPlayerGuess) {
+                return null;
+              }
+
+              return (
+                <>
+                  <Marker
+                    position={[round.guessLat, round.guessLong]}
+                    icon={
+                      // Tier MUST match the stock pin on the fallback line
+                      // below, or a skinned pin renders a different size than
+                      // everyone else's. This map draws the FULL-size pins
+                      // (icons.src / icons.dest, 30x49), so the base tier is
+                      // '' — 'Small' is the 25x41 set only components/Map.js
+                      // uses, where every pin is small.
+                      allIconsRef.current?.[markerSkinIconKey(
+                        round.players?.[myId]?.markerSkin ?? myMarkerSkin,
+                        bestIds?.has(myId) ? 'Big' : ''
+                      )]
+                      || (bestIds?.has(myId) ? srcBigIconRef.current : srcIconRef.current)
+                    }
+                  >
+                    {showLabels && (
+                      <GuessPinLabel
+                        label={text("yourGuess")}
+                        // No nameGlow: this label is a UI string, not a name.
+                        // See the prop list at the top of this file.
+                        big={!!bestIds?.has(myId)}
+                      />
+                    )}
+                    <Popup>
+                      <div>
+                        <strong>{text("yourGuess")}</strong><br />
+                        {text("roundNo", { r: index + 1 })}<br />
+                        {round.points} {text("points")}
+                      </div>
+                    </Popup>
+                  </Marker>
+
+                  {/* Team games: only the counted (best) guess draws a line
+                      — mirrors roundOverScreen. bestIds null → all lines. */}
+                  {(!bestIds || bestIds.has(myId)) && (
+                    <Polyline
+                      positions={[[round.lat, round.long], [round.guessLat, round.guessLong]]}
+                      color={getPointsColor(round.points)}
+                      weight={3}
+                      opacity={0.7}
+                    />
+                  )}
+                </>
+              );
+            })()}
+
+            {/* Other players' guesses */}
+            {round.players && Object.entries(round.players).map(([playerId, player]) => {
+              if (player.lat && player.long && playerId !== myId) {
+                const shouldShowOpponent =
+                  (activeRound === null || activeRound === index) &&
+                  (!selectedPlayer || selectedPlayer === playerId);
+
+                if (!shouldShowOpponent) {
+                  return null;
+                }
+
+                const popupGlow = cachedNameGlowProps(player.nameGlow, GLOW_LIGHT, { ownBox: true });
+
+                return (
+                  <React.Fragment key={`${index}-${playerId}`}>
+                    {/* Teammates blue (your pin), enemies green; each team's
+                        closest guesser enlarged. */}
+                    <Marker
+                      position={[player.lat, player.long]}
+                      icon={
+                        // Purchased skin wins over the team pin, matching Map.js.
+                        allIconsRef.current?.[markerSkinIconKey(player.markerSkin, bestIds?.has(playerId) ? 'Big' : '')]
+                        || (isMyTeammate(playerId)
+                          ? (bestIds?.has(playerId) ? srcBigIconRef.current : srcIconRef.current)
+                          : (bestIds?.has(playerId) ? src2BigIconRef.current : src2IconRef.current))
+                      }
+                    >
+                      {showLabels && (
+                        <GuessPinLabel
+                          label={player.username || text("opponent")}
+                          countryCode={player.countryCode || null}
+                          nameGlow={player.nameGlow ?? null}
+                          big={!!bestIds?.has(playerId)}
+                        />
+                      )}
+                      <Popup>
+                        <div>
+                          <strong
+                            // Leaflet popup chrome is WHITE, so this takes the
+                            // LIGHT glow variant — class AND inline style, the
+                            // same pair the pin label wears, because the class
+                            // is what carries the @keyframes for an animated
+                            // sku. `ownBox` since this <strong> is the box.
+                            // `nameGlow` rides on the round's player entry —
+                            // absent (older hosts) simply means no glow.
+                            className={popupGlow?.className}
+                            style={{
+                              cursor: 'default',
+                              textDecoration: 'none',
+                              color: 'inherit',
+                              ...popupGlow?.style
+                            }}
+                          >
+                            {player.username || text("opponent")}
+                          </strong><br />
+                          {text("roundNo", { r: index + 1 })}<br />
+                          {player.points} {text("points")}
+                        </div>
+                      </Popup>
+                    </Marker>
+
+                    {(!bestIds || bestIds.has(playerId)) && (
+                      <Polyline
+                        positions={[[round.lat, round.long], [player.lat, player.long]]}
+                        color={getPointsColor(player.points)}
+                        weight={2}
+                        opacity={0.5}
+                      />
+                    )}
+                  </React.Fragment>
+                );
+              }
+              return null;
+            })}
+          </React.Fragment>
+        );
+      })}
+    </MapContainer>
+  );
+}

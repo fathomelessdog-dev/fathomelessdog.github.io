@@ -1,0 +1,123 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useTranslation } from '@/components/useTranslations';
+import sendEvent from './utils/sendEvent';
+
+/**
+ * `autoSelect`: a mode this overlay must commit to on its own, no tap. The
+ * onboarding login button sits above this overlay but opens a modal below it,
+ * so home.js answers the mode question for the user (classic) rather than
+ * stack two modals — see the prop site. It routes through the SAME exit as a
+ * real tap, so the fade-out crossfades into whatever opened underneath, and
+ * the selection is reported exactly once.
+ */
+export default function WelcomeOverlay({ onModeSelected, onSkip, autoSelect }) {
+  const { t: text } = useTranslation("common");
+  const [visible, setVisible] = useState(false);
+  // The backdrop is dark from the first frame (it takes over from the
+  // _document pre-paint cover); only the exit fades it.
+  const [leaving, setLeaving] = useState(false);
+  // One exit per overlay. The login button stays tappable through the 300ms
+  // fade, so a tap landing on top of a running exit must not fire a second
+  // analytics event or a second commit.
+  const dismissedRef = useRef(false);
+
+  // Before paint, so the pre-paint cover and this backdrop never both drop.
+  useLayoutEffect(() => {
+    document.documentElement.classList.remove('wg-welcome-pending');
+  }, []);
+
+  useEffect(() => {
+    sendEvent("onboarding_shown");
+    requestAnimationFrame(() => setVisible(true));
+  }, []);
+
+  function dismiss(mode, done, extra) {
+    if (dismissedRef.current) return;
+    dismissedRef.current = true;
+    setVisible(false);
+    setLeaving(true);
+    setTimeout(() => {
+      sendEvent("onboarding_mode_selected", { mode, ...extra });
+      done();
+    }, 300);
+  }
+
+  function selectMode(mode) {
+    dismiss(mode, () => onModeSelected(mode));
+  }
+
+  function skip() {
+    dismiss("skipped", onSkip);
+  }
+
+  // `auto: "login"` keeps the picked-for-them selections separable from the
+  // tapped ones in analytics: the mode is real either way, the intent is not.
+  useEffect(() => {
+    if (!autoSelect) return;
+    dismiss(autoSelect, () => onModeSelected(autoSelect), { auto: "login" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSelect]);
+
+  const isSchoolGuessr = process.env.NEXT_PUBLIC_SCHOOLGUESSR === "true";
+
+  return (
+    // data-nosnippet: Googlebot lands with no localStorage, so this overlay is
+    // what it sees first — it was scraping the welcome copy into mangled search
+    // snippets ("...jado en algún lugar de la Tierra") instead of the meta
+    // description. Keeps the text indexed, just out of snippets.
+    <div className={`welcome-modal-backdrop ${leaving ? '' : 'visible'}`} data-nosnippet="">
+      <div className={`welcome-modal ${visible ? 'visible' : ''}`}>
+        <h1 className="welcome-modal__title">
+          {isSchoolGuessr ? "Welcome to SchoolGuessr!" : text("welcomeTitle")}
+        </h1>
+        {isSchoolGuessr ? (
+          <>
+            <p className="welcome-modal__desc">
+              A kid-friendly version of WorldGuessr made for classrooms and schools.
+            </p>
+            <ul style={{
+              textAlign: 'left',
+              margin: '0 auto 16px',
+              maxWidth: '360px',
+              padding: '0 0 0 20px',
+              lineHeight: '1.6',
+              fontSize: '0.95rem',
+              opacity: 0.92,
+            }}>
+              <li>Chats and user content are turned off</li>
+              <li>Same maps and gameplay as WorldGuessr</li>
+              <li>Maintained by the WorldGuessr team!</li>
+            </ul>
+          </>
+        ) : (
+          <p className="welcome-modal__desc">
+            {text("welcomeDesc")}
+          </p>
+        )}
+
+        <div className="welcome-modal__modes">
+          <button className="welcome-modal__mode-btn welcome-modal__mode-btn--recommended" onClick={() => selectMode("country")}>
+            <div className="welcome-modal__mode-badge">{text("recommended")}</div>
+            <span className="welcome-modal__mode-icon">🏳️</span>
+            <div>
+              <strong>{text("countryGuesser")}</strong>
+              <span className="welcome-modal__mode-sub">{text("countryGuessrDesc")}</span>
+            </div>
+          </button>
+
+          <button className="welcome-modal__mode-btn" onClick={() => selectMode("classic")}>
+            <span className="welcome-modal__mode-icon">🗺️</span>
+            <div>
+              <strong>{text("classic")}</strong>
+              <span className="welcome-modal__mode-sub">{text("classicDesc")}</span>
+            </div>
+          </button>
+        </div>
+
+        <button className="welcome-modal__skip" onClick={skip}>
+          {text("skipTutorial")}
+        </button>
+      </div>
+    </div>
+  );
+}

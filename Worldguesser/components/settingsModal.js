@@ -1,0 +1,489 @@
+import { useState, useEffect } from "react";
+import { EXPLICIT_LANGUAGE_KEY } from "@/components/utils/playgamaStorage";
+import gameStorage from "@/components/utils/localStorage";
+import { Modal } from "react-responsive-modal";
+import NextImage from "next/image";
+import { useTranslation } from '@/components/useTranslations';
+import { asset, navigate } from '@/lib/basePath';
+import sendEvent from "@/components/utils/sendEvent";
+import { FaGithub } from "react-icons/fa";
+import { FaCircleInfo } from "react-icons/fa6";
+import { useMultiplayer } from '@/components/multiplayer/MultiplayerProvider';
+import ConfirmModal from './ui/Modal';
+import { signOut } from '@/components/auth/auth';
+import { toast } from 'react-toastify';
+import VolumeSliders from './ui/volumeSliders';
+import { getStrictFloor } from './utils/leagues';
+
+// Section header built ONLY from the modal's existing vocabulary:
+// .settingsModalInner gives the same indent as the option rows, the <label>
+// inherits the exact row-label typography, and the g2_nav_hr underline
+// mirrors the modal title's own treatment. Sections are what keep the
+// one-column option list scannable — every new setting goes under one.
+function SectionHeader({ label, color, first }) {
+    return (
+        <div className="settingsModalInner" style={{ marginTop: first ? 0 : '25px', flexDirection: 'column', alignItems: 'flex-start', gap: '2px' }}>
+            <label style={color ? { color } : undefined}>{label}</label>
+            <div className="g2_nav_hr" style={{ width: '100%', margin: 0 }}></div>
+        </div>
+    );
+}
+
+export default function SettingsModal({ shown, onClose, options, setOptions, inCrazyGames, inGameDistribution, isApp, multiplayerEmotesEnabled, setMultiplayerEmotesEnabled, multiplayerChatEnabled, setMultiplayerChatEnabled, session, setSession, ws, onOpenAbout }) {
+    const { t: text } = useTranslation("common");
+
+    // ── Account settings ─────────────────────────────────────────────────
+    // Server-backed per-account preferences — NEVER localStorage. Shown only
+    // when logged in. Both values ride the ws 'friends' message; checkboxes
+    // stay disabled until the first one arrives. Toggles flip optimistically,
+    // but the server echoes authoritative state after EVERY write attempt
+    // (accepted, cooldown-rejected, or failed), so a refused write snaps the
+    // checkbox back instead of lying.
+    const loggedIn = !!session?.token?.secret;
+    const [accountSettings, setAccountSettings] = useState(null);
+
+    // Ride the provider's single parsed-message stream instead of a raw ws
+    // listener (which re-parsed every message a second time).
+    const { subscribeMessages } = useMultiplayer();
+    useEffect(() => {
+        if (!shown || !loggedIn || !ws) return;
+
+        const unsubscribe = subscribeMessages((data) => {
+            if (data.type === 'friends') {
+                setAccountSettings({
+                    allowFriendReq: !!data.allowFriendReq,
+                    hideLastSeen: !!data.hideLastSeen,
+                    strictMatchmaking: !!data.strictMatchmaking,
+                });
+            }
+        });
+        ws.send(JSON.stringify({ type: 'getFriends' }));
+
+        return unsubscribe;
+    }, [shown, loggedIn, ws, subscribeMessages]);
+
+    // Optimistic flip — the server's 'friends' echo confirms or reverts it.
+    const toggleAllowFriendReq = (checked) => {
+        setAccountSettings((prev) => ({ ...prev, allowFriendReq: checked }));
+        ws?.send(JSON.stringify({ type: 'setAllowFriendReq', allow: checked }));
+    };
+    const toggleHideLastSeen = (checked) => {
+        setAccountSettings((prev) => ({ ...prev, hideLastSeen: checked }));
+        ws?.send(JSON.stringify({ type: 'setHideLastSeen', hide: checked }));
+    };
+    const toggleStrictMatchmaking = (checked) => {
+        setAccountSettings((prev) => ({ ...prev, strictMatchmaking: checked }));
+        ws?.send(JSON.stringify({ type: 'setStrictMatchmaking', strict: checked }));
+    };
+    // Voyager+ only (server enforces too): below the floor the row hides
+    // entirely rather than showing a disabled tease.
+    //
+    // getStrictFloor(), NOT leagues.voyager.min. That constant is 5,000 on the
+    // retired Season 0 scale and a v2 rating tops out near 1,600, so this row
+    // was hidden from EVERY account on the ladder — the setting silently left
+    // the product while its copy and its User field kept shipping.
+    const strictEligible = (session?.token?.elo ?? 0) >= getStrictFloor();
+    const [strictInfoShown, setStrictInfoShown] = useState(false);
+
+    // ── Danger Zone — account deletion (moved here from the moderation view) ──
+    // Multi-step confirm. 0 = closed, 1 = warning, 2 = type-to-confirm.
+    const [deleteStep, setDeleteStep] = useState(0);
+    const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [deleting, setDeleting] = useState(false);
+    const [restoring, setRestoring] = useState(false);
+
+    // Final step: schedules deletion (fast — flag + 30-day grace), then signs out.
+    // signOut() reloads + wipes the secret, so the fetch MUST resolve first.
+    const username = session?.token?.username || '';
+    const confirmMatches = deleteConfirmText.trim().toLowerCase() === username.toLowerCase() && username.length > 0;
+    const handleDeleteAccount = async () => {
+        if (deleting || !confirmMatches) return;
+        setDeleting(true);
+        try {
+            const res = await fetch(window.cConfig.apiUrl + '/api/deleteAccount', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ secret: session?.token?.secret }),
+            });
+            if (res.ok) {
+                setDeleteStep(0);
+                signOut();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                toast.error(data.error || data.message || text("deleteAccountFailed"));
+                setDeleting(false);
+            }
+        } catch (e) {
+            toast.error(text("deleteAccountFailed"));
+            setDeleting(false);
+        }
+    };
+
+    // If the account is already within its 30-day deletion grace window, the Danger
+    // Zone offers Restore instead of Delete.
+    const pendingDeletion = !!session?.token?.pendingDeletion;
+    const scheduledDeletionAt = session?.token?.scheduledDeletionAt;
+    const handleRestore = async () => {
+        if (restoring) return;
+        setRestoring(true);
+        try {
+            const res = await fetch(window.cConfig.apiUrl + '/api/cancelDeletion', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ secret: session?.token?.secret }),
+            });
+            if (res.ok) {
+                setSession?.((prev) => prev ? { token: { ...prev.token, pendingDeletion: false, scheduledDeletionAt: null } } : prev);
+                toast.success(text("accountRestoredBody"));
+            } else {
+                const data = await res.json().catch(() => ({}));
+                toast.error(data.error || text("deleteAccountFailed"));
+            }
+        } catch (e) {
+            toast.error(text("deleteAccountFailed"));
+        } finally {
+            setRestoring(false);
+        }
+    };
+
+    const handleUnitsChange = (event) => {
+        setOptions((prevOptions) => ({ ...prevOptions, units: event.target.value }));
+    };
+
+    const handleMapTypeChange = (event) => {
+        setOptions((prevOptions) => ({ ...prevOptions, mapType: event.target.value }));
+    };
+
+    const handleLanguageChange = (event) => {
+        // 6x: mark this as the player's own choice so the boot gate lets it
+        // beat platform.language on later launches (Home saves "lang" on every
+        // load, so the value alone cannot tell a choice from the default).
+        if (process.env.NEXT_PUBLIC_6X === "true") gameStorage.setItem(EXPLICIT_LANGUAGE_KEY, "1");
+        setOptions((prevOptions) => ({ ...prevOptions, language: event.target.value }));
+    };
+
+    if (!options) return null;
+
+    // This is a full-screen page, so it deliberately opts out of the modal
+    // library's iOS body lock and owns its scroll surface below.
+    return (
+        <Modal id="" styles={{
+            modal: {
+                zIndex: 100,
+                color: 'white',
+                padding: '0px',
+                borderRadius: '10px',
+                top: "0px",
+                margin: "0",
+                left: "0px",
+                maxWidth: '500px',
+                textAlign: 'center',
+                position: "absolute",
+                // var(--site-bg), not a resolved path: it carries the basePath
+                // already and it reflects a purchased background (see
+                // lib/siteBackground.js), which a literal here would not.
+                // The green stop is --washChannels (styles/globals.scss) so it
+                // follows an equipped background's accent; .settingsPage is in
+                // the accent scope. Alpha and angle stay this file's own.
+                background: 'linear-gradient(0deg, rgba(0, 0, 0, 0.8) 0%, rgba(var(--washChannels), 0.5) 100%), var(--site-bg)',
+                objectFit: "cover",
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+            },
+            closeButton: {
+                backgroundColor: 'white'
+            }
+        }} classNames={
+            {
+                // Settings is a full-screen page. Give its shell and portal
+                // container dedicated classes so neither inherits the modal
+                // library's competing scroll surfaces.
+                modal: 'g2_modal settingsPage',
+                modalContainer: 'settingsPageContainer'
+            }
+        }
+            open={shown}
+            center
+            onClose={onClose}
+            showCloseIcon={false}
+            animationDuration={0}
+            blockScroll={false}
+            aria-labelledby="settings-page-title"
+        >
+
+            <div className="g2_nav_ui">
+                <h1 id="settings-page-title" className="g2_nav_title">{text("settings")}</h1>
+                <div className="g2_nav_hr"></div>
+
+                <button className="g2_nav_text singleplayer red" onClick={onClose}>{text("back")}</button>
+            </div>
+            <div className="g2_content settingsModal">
+                <div style={{ height: "50px" }}></div>
+
+
+                <SectionHeader label={text("audioSettings")} first />
+
+                <VolumeSliders />
+
+                <SectionHeader label={text("generalSettings")} />
+
+                <div className="settingsModalInner">
+                    <label htmlFor="units">{text("units")}: </label>
+                    <select className="g2_input" id="units" value={options.units} onChange={handleUnitsChange}>
+                        <option value="metric">{text("metric")}</option>
+                        <option value="imperial">{text("imperial")}</option>
+                    </select>
+                </div>
+
+                <div className="settingsModalInner">
+                    <label htmlFor="mapType">{text("mapType")}: </label>
+                    <select className="g2_input" id="mapType" value={options.mapType} onChange={handleMapTypeChange}>
+                        <option value="m">{text("normal")}</option>
+                        <option value="s">{text("satellite")}</option>
+                        <option value="p">{text("terrain")}</option>
+                        <option value="y">{text("hybrid")}</option>
+                    </select>
+                </div>
+
+                {!inCrazyGames && !inGameDistribution && (<>
+                    <div className="settingsModalInner">
+                        <label htmlFor="mapType">{text("language")}: </label>
+                        <select className="g2_input" id="mapType" value={options.language} onChange={handleLanguageChange}>
+                            <option value="en">English</option>
+                            <option value="es">Español</option>
+                            <option value="fr">Français</option>
+                            <option value="de">Deutsch</option>
+                            <option value="ru">Русский</option>
+                        </select>
+                    </div>
+                    {typeof setMultiplayerEmotesEnabled === 'function' && (
+                        <div className="settingsModalInner">
+                            <label htmlFor="mpEmotes">{text("multiplayerEmoteReactions")}</label>
+                            <input className="g2_input" type="checkbox" id="mpEmotes" checked={!!multiplayerEmotesEnabled} onChange={() => setMultiplayerEmotesEnabled(!multiplayerEmotesEnabled)} />
+                        </div>
+                    )}
+                    {typeof setMultiplayerChatEnabled === 'function' && (
+                        <div className="settingsModalInner">
+                            <label htmlFor="mpChat">{text("multiplayerChat")}</label>
+                            <input className="g2_input" type="checkbox" id="mpChat" checked={!!multiplayerChatEnabled} onChange={() => setMultiplayerChatEnabled(!multiplayerChatEnabled)} />
+                        </div>
+                    )}
+                </>
+                )}
+
+                {/* Account settings — server-backed, logged-in only */}
+                {loggedIn && (
+                    <>
+                        <SectionHeader label={text("accountSettings")} />
+                        <div className="settingsModalInner">
+                            <label htmlFor="allowFriendReq">{text("allowFriendRequests")}</label>
+                            <input
+                                className="g2_input"
+                                type="checkbox"
+                                id="allowFriendReq"
+                                checked={!!accountSettings?.allowFriendReq}
+                                disabled={accountSettings === null}
+                                onChange={(e) => toggleAllowFriendReq(e.target.checked)}
+                            />
+                        </div>
+                        <div className="settingsModalInner">
+                            <label htmlFor="hideLastSeen">{text("hideMyLastSeen")}</label>
+                            <input
+                                className="g2_input"
+                                type="checkbox"
+                                id="hideLastSeen"
+                                checked={!!accountSettings?.hideLastSeen}
+                                disabled={accountSettings === null}
+                                onChange={(e) => toggleHideLastSeen(e.target.checked)}
+                            />
+                        </div>
+                        {strictEligible && (
+                        <>
+                        <div className="settingsModalInner">
+                            <label htmlFor="strictMatchmaking">
+                                {text("strictMatchmaking")}
+                                <button
+                                    type="button"
+                                    className="settings-info-btn"
+                                    aria-label={text("strictMatchmakingHint")}
+                                    onClick={() => setStrictInfoShown((s) => !s)}
+                                ><FaCircleInfo /></button>
+                            </label>
+                            <input
+                                className="g2_input"
+                                type="checkbox"
+                                id="strictMatchmaking"
+                                checked={!!accountSettings?.strictMatchmaking}
+                                disabled={accountSettings === null}
+                                onChange={(e) => toggleStrictMatchmaking(e.target.checked)}
+                            />
+                        </div>
+                        {strictInfoShown && (
+                            <div className="settings-info-card">{text("strictMatchmakingHint")}</div>
+                        )}
+                        </>
+                        )}
+
+                        {/* Danger Zone — account deletion (hidden in CrazyGames iframe).
+                            If a deletion is already scheduled, this becomes a Restore prompt instead. */}
+                        {!inCrazyGames && (
+                            <>
+                                <SectionHeader label={text("dangerZone")} color={pendingDeletion ? '#ff9800' : '#ff6b6b'} />
+                                {/* width:auto + stretch — the class's desktop width:max-content would
+                                    let the single-line deletion-date sentence overflow the modal */}
+                                <div className="settingsModalInner" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px', width: 'auto', alignSelf: 'stretch' }}>
+                                    {pendingDeletion ? (
+                                        <>
+                                            <p style={{ color: '#e0e0e0', margin: 0, fontSize: '14px', textAlign: 'left' }}>
+                                                {scheduledDeletionAt
+                                                    ? text("accountScheduledForDeletion", { date: new Date(scheduledDeletionAt).toLocaleDateString() })
+                                                    : text("accountScheduledForDeletionShort")}
+                                            </p>
+                                            <button
+                                                onClick={handleRestore}
+                                                disabled={restoring}
+                                                style={{
+                                                    background: 'var(--primary)',
+                                                    color: '#fff',
+                                                    border: '2px solid var(--primary)',
+                                                    borderRadius: '8px',
+                                                    padding: '10px 20px',
+                                                    cursor: 'pointer',
+                                                    fontFamily: '"Lexend", "Lexend Fallback", sans-serif',
+                                                    fontSize: '14px',
+                                                    opacity: restoring ? 0.6 : 1
+                                                }}
+                                            >
+                                                {text("restoreAccount")}
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <p style={{ color: '#b0b0b0', margin: 0, fontSize: '13px', textAlign: 'left' }}>
+                                                {text("dangerZoneSubtitle")}
+                                            </p>
+                                            <button
+                                                onClick={() => { setDeleteConfirmText(''); setDeleteStep(1); }}
+                                                style={{
+                                                    background: 'transparent',
+                                                    color: '#ff6b6b',
+                                                    border: '1px solid rgba(220, 53, 69, 0.6)',
+                                                    borderRadius: '8px',
+                                                    padding: '10px 20px',
+                                                    cursor: 'pointer',
+                                                    fontFamily: '"Lexend", "Lexend Fallback", sans-serif',
+                                                    fontSize: '14px'
+                                                }}
+                                            >
+                                                {text("deleteAccount")}
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </>
+                )}
+
+                {inCrazyGames && (
+                    <a href={navigate("/privacy-crazygames")} target="_blank" rel="noreferrer" style={{ marginTop: '20px', display: 'block', color: "white" }}>Privacy Policy</a>
+                )}
+
+                {/* Keep every page item inside the one settings scroll surface.
+                    Desktop fixes these links over the nav column; the mobile
+                    column layout puts them in flow after the final setting. */}
+                {!inCrazyGames && !inGameDistribution && !process.env.NEXT_PUBLIC_COOLMATH && !process.env.NEXT_PUBLIC_POKI && !process.env.NEXT_PUBLIC_6X && (
+                    <div className="g2_slide_in settingsFooterLinks">
+                        <a href="https://github.com/codergautam/worldguessr" target="_blank" rel="noreferrer">
+                            <button className="g2_hover_effect home__squarebtn gameBtn g2_container_full" aria-label="Github" style={{ width: '50px', height: '50px', padding: '0', color: 'white' }}><FaGithub size={24} /></button>
+                        </a>
+                        <a href="https://worldguessr.com/privacy.html" target="_blank" rel="noreferrer">
+                            <button className="g2_hover_effect gameBtn g2_container_full" aria-label="Terms & Privacy" style={{ height: '50px', padding: '0 12px', color: 'white', fontSize: '13px', whiteSpace: 'nowrap' }}>Terms & Privacy</button>
+                        </a>
+                        {/* Opens the About panel (components/aboutPanel.js), the
+                            homepage's prose. home.js passes the opener only on
+                            main-site home pages, where the panel is mounted. */}
+                        {onOpenAbout && (
+                            <button className="g2_hover_effect gameBtn g2_container_full" aria-label={text("aboutLink")} style={{ height: '50px', padding: '0 12px', color: 'white', fontSize: '13px', whiteSpace: 'nowrap' }} onClick={onOpenAbout}>{text("aboutLink")}</button>
+                        )}
+                        {/* CoolMathGames backlink, moved here from the home footer row.
+                            It keeps its OWN gates rather than riding this block's: the
+                            webview app (?app=true) and SchoolGuessr hide it, and both
+                            are irrelevant to GitHub / Terms beside it. The logo is a
+                            `fill` image, which anchors to the nearest positioned
+                            ancestor — .home__squarebtn supplies the position:relative,
+                            so that class must stay on the button. */}
+                        {!isApp && !process.env.NEXT_PUBLIC_SCHOOLGUESSR && (
+                            <a href="https://www.coolmathgames.com/0-worldguessr" target="_blank" rel="noreferrer" onClick={() => sendEvent("coolmathgames_backlink_click")}>
+                                <button className="g2_hover_effect home__squarebtn gameBtn g2_container_full" aria-label="CoolmathGames" title="Coolmath Games" style={{ width: '50px', height: '50px', padding: '0' }}><NextImage.default src={asset('/cmlogo.png')} draggable={false} fill sizes="50px" alt="Coolmath Games Logo" className="home__squarebtnicon" /></button>
+                            </a>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* Step 1 — warning + consequences */}
+            <ConfirmModal
+                isOpen={deleteStep === 1}
+                onClose={() => setDeleteStep(0)}
+                title={text("deleteAccountConfirmTitle")}
+                variant="error"
+                disableBackdropClose={true}
+                actions={
+                    <>
+                        <button onClick={() => setDeleteStep(0)} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                            {text("cancel")}
+                        </button>
+                        <button onClick={() => setDeleteStep(2)} style={{ background: '#dc3545', border: '2px solid #dc3545' }}>
+                            {text("continue")}
+                        </button>
+                    </>
+                }
+            >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', textAlign: 'left' }}>
+                    <p style={{ margin: 0, color: 'rgba(255, 255, 255, 0.9)' }}>{text("deleteAccountConfirmBody", { days: 30 })}</p>
+                    <p style={{ margin: 0, color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px' }}>{text("deleteAccountLossList")}</p>
+                </div>
+            </ConfirmModal>
+
+            {/* Step 2 — type-to-confirm */}
+            <ConfirmModal
+                isOpen={deleteStep === 2}
+                onClose={() => { if (!deleting) setDeleteStep(0); }}
+                title={text("deleteAccountFinalTitle")}
+                variant="error"
+                disableBackdropClose={true}
+                actions={
+                    <>
+                        <button onClick={() => setDeleteStep(0)} disabled={deleting} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+                            {text("cancel")}
+                        </button>
+                        <button
+                            onClick={handleDeleteAccount}
+                            disabled={deleting || !confirmMatches}
+                            style={{ background: '#dc3545', border: '2px solid #dc3545', opacity: (deleting || !confirmMatches) ? 0.5 : 1 }}
+                        >
+                            {deleting ? text("deleting") : text("deleteAccountPermanently")}
+                        </button>
+                    </>
+                }
+            >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', textAlign: 'left' }}>
+                    <p style={{ margin: 0, color: 'rgba(255, 255, 255, 0.9)' }}>
+                        {text("deleteAccountTypeToConfirm", { username })}
+                    </p>
+                    <input
+                        type="text"
+                        value={deleteConfirmText}
+                        onChange={(e) => setDeleteConfirmText(e.target.value)}
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        placeholder={username}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.05)', color: 'white', fontSize: '14px', fontFamily: '"Lexend", "Lexend Fallback", sans-serif', boxSizing: 'border-box' }}
+                    />
+                </div>
+            </ConfirmModal>
+        </Modal>
+    );
+}

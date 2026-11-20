@@ -1,0 +1,76 @@
+import { useState, useEffect } from 'react';
+import en from '../public/locales/en/common.json';
+import es from '../public/locales/es/common.json';
+import fr from '../public/locales/fr/common.json';
+import de from '../public/locales/de/common.json';
+import ru from '../public/locales/ru/common.json';
+import { useRouter } from 'next/router';
+import { stripBase } from '@/lib/basePath';
+import gameStorage from './utils/localStorage';
+
+const langs = ["en", "es", "fr", "de", "ru"];
+// The one list of renderable locales; the 6x boot gate validates against it.
+export function supportedLangs() {
+  return langs;
+}
+const langMap = { en, es, fr, de, ru };
+
+export function getLangFromPath(path) {
+  if(path.includes("/ru")) return "ru";
+  if(path.includes("/es")) return "es";
+  if(path.includes("/fr")) return "fr";
+  if(path.includes("/de")) return "de";
+  return null;
+}
+
+export function useTranslation() {
+  const router = useRouter();
+
+  const pathLang = process.env.NEXT_PUBLIC_6X === 'true' ? null : getLangFromPath(stripBase(router.asPath));
+
+  const [storedLang, setStoredLang] = useState(null);
+
+  useEffect(() => {
+    if(pathLang) return;
+
+    const readStored = () => {
+      try {
+        const stored = process.env.NEXT_PUBLIC_6X === 'true'
+          ? window.language || gameStorage.getItem("lang")
+          : window.localStorage.getItem("lang");
+        if(stored && langs.includes(stored)) setStoredLang(stored);
+      } catch(e) {}
+    };
+
+    readStored();
+
+    const handler = (e) => {
+      const next = e?.detail;
+      if(next && langs.includes(next)) setStoredLang(next);
+      else readStored();
+    };
+    window.addEventListener('langChange', handler);
+    return () => window.removeEventListener('langChange', handler);
+  }, [pathLang]);
+
+  // URL path takes priority, then localStorage, then "en"
+  const language = pathLang || storedLang || "en";
+
+  return {
+    lang: language,
+    t: (key, vars) => {
+      let string = langMap[language]?.[key];
+      if(!string) {
+        string = en[key] || key;
+      }
+
+      if(vars) {
+        for(let v in vars) {
+          string = string.replace(`{{${v}}}`, vars[v]);
+        }
+      }
+
+      return string;
+    }
+  };
+}
