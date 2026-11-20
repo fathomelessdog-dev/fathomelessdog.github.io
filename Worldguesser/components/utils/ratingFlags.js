@@ -1,0 +1,80 @@
+// Rating v2 rollout constants. Every env read for the rating system lives HERE
+// and nowhere else: components/utils/eloSystem.js must stay a pure math module
+// with no imports and no process, because that purity is the only reason its
+// transfer arithmetic can be unit tested at all.
+//
+// This file may import eloSystem (pure, importless) but NOTHING may import this
+// file from eloSystem, or that purity is gone.
+import { ENTRY_RATING } from './eloSystem.js';
+//
+// There is no RATING_V2 flag any more. The rollout finished with the Aug 12
+// 2026 migration and the flag (hardcoded `true` since then) was retired along
+// with the v1 engine and every dead `RATING_V2 ? : ` branch. Reverting to
+// Season 0 was never a flag flip anyway — the DB holds v2 ratings, so the real
+// revert is scripts/rollbackRatingV2.js (restores elo from elo_s0) plus a code
+// revert from git history.
+
+// MIGRATION_AT         The instant the one-time migration ran. Accounts created
+//                      at or after it are the ONLY ones allowed into placements
+//                      (components/utils/placementGates.js gate 2), and
+//                      api/leaderboard.js measures the ranked-activity window
+//                      from it.
+//
+//                      Not read from the env either, for the same reason as
+//                      above: one value, true everywhere, nothing to configure.
+//                      RATING_V2_MIGRATION_AT in .env is now INERT and can be
+//                      deleted.
+//
+//                      THIS IS THE REAL PRODUCTION MIGRATION INSTANT: the
+//                      moment scripts/migrateRatingV2.js --apply finished its
+//                      mapping pass on prod (started 15:27:28Z, 257s elapsed,
+//                      completed 15:31:45Z).
+//
+//                      IT IS THE COMPLETION INSTANT, NOT THE START, and not a
+//                      round number in between. Two independent readers split
+//                      history on it:
+//
+//                        - api/userProgression.js converts UserStats points
+//                          older than this onto the v2 scale. A cutoff INSIDE
+//                          the 4-minute write window (15:30:00Z was the first
+//                          attempt) leaves points written after it, for accounts
+//                          the migration had not reached yet, classified as
+//                          already-v2 and served raw — a profile graph showing
+//                          Season 0 numbers next to a v2 rating.
+//                        - components/utils/placementGates.js gate 1.
+//
+//                      Too EARLY is the dangerous direction for BOTH: every
+//                      account created after it that still has ratedGames 0 is
+//                      placement-eligible, and a placement win overwrites a
+//                      migrated rating with a 500-900 seed. The dev value that
+//                      shipped here before (2026-08-07T21:36Z) was five days
+//                      early, which left 22.5k accounts placement-eligible and
+//                      made every progression point since Aug 7 render on the
+//                      old scale. Too late merely delays placements for
+//                      genuinely new accounts.
+export const MIGRATION_AT = new Date('2026-08-12T15:31:45.000Z');
+
+// STARTING_ELO      Where a brand-new account's rating starts, and the value
+//                   every "this rating is missing, use the default" fallback in
+//                   the codebase must resolve to.
+//
+//                   IT LIVES HERE BECAUSE IT WAS TYPED AS A LITERAL IN ~15
+//                   PLACES AND ALL OF THEM WERE WRONG AFTER THE MIGRATION.
+//                   `1000` was correct on the Season 0 scale. On v2 it sits
+//                   inside VOYAGER (1000-1299), above the median of 800 and
+//                   above roughly 85% of the ladder. Two consequences, both
+//                   shipped:
+//
+//                     - a new account was created at 1000, then its placement
+//                       seeded it somewhere in 500..800 — ALWAYS lower. So the
+//                       first ranked game a player ever plays, which the
+//                       throwing placement bot guarantees they win, rendered as
+//                       a rating drop and a demotion out of gold.
+//                     - every `user.elo || 1000` fallback silently invented a
+//                       Voyager-grade rating for an account whose rating failed
+//                       to load, on profiles, leaderboards and stats history.
+//
+//                   Both scales are named, never typed, so this can never drift
+//                   from the engine again. Anything that needs "the default
+//                   rating" imports this.
+export const STARTING_ELO = ENTRY_RATING;
