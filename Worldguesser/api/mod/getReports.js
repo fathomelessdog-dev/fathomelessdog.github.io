@@ -1,0 +1,373 @@
+import User from '../../models/User.js';
+import Report from '../../models/Report.js';
+import ModerationLog from '../../models/ModerationLog.js';
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method not allowed' });
+  }
+
+  const { secret, status, reason, gameType, limit = 50, skip = 0, showAll = false } = req.body;
+
+  // Validate secret
+  if (!secret || typeof secret !== 'string') {
+    return res.status(400).json({ message: 'Invalid secret' });
+  }
+
+  try {
+    // Verify requesting user is staff
+    const requestingUser = await User.findOne({ secret });
+    if (!requestingUser || !requestingUser.staff) {
+      return res.status(403).json({ message: 'Unauthorized' });
+    }
+
+    // Build query for status filter
+    const matchQuery = {};
+    if (status && ['pending', 'reviewed', 'dismissed', 'action_taken'].includes(status)) {
+      matchQuery.status = status;
+    }
+    
+    // Add reason filter if provided
+    if (reason && ['inappropriate_username', 'cheating', 'other'].includes(reason)) {
+      matchQuery.reason = reason;
+    }
+
+    // Add game-type filter if provided (1v1 duels vs 2v2 vs casual modes)
+    const VALID_GAME_TYPES = ['ranked_duel', 'unranked_multiplayer', 'private_multiplayer', '2v2'];
+    if (gameType && VALID_GAME_TYPES.includes(gameType)) {
+      matchQuery.gameType = gameType;
+    }
+
+    // Co-reported linkage: for every report in the response, find OTHER
+    // players the same reporter reported from the SAME game (the co-cheating
+    // 2v2 duo case). Attached as coReported so mods see the pair even though
+    // the queue groups each accused player separately — banning one or both
+    // stays at mod discretion.
+    const attachCoReported = async (reports) => {
+      const clauses = [];
+      const seen = new Set();
+      for (const r of reports) {
+        const key = `${r.gameId}|${r.reportedBy.accountId}`;
+        if (!r.gameId || seen.has(key)) continue;
+        seen.add(key);
+        clauses.push({ gameId: r.gameId, 'reportedBy.accountId': r.reportedBy.accountId });
+      }
+      if (!clauses.length) return;
+      const siblings = await Report.find({ $or: clauses })
+        .select('gameId reportedBy.accountId reportedUser')
+        .lean();
+      const byKey = {};
+      for (const s of siblings) {
+        const key = `${s.gameId}|${s.reportedBy.accountId}`;
+        (byKey[key] = byKey[key] || []).push(s.reportedUser);
+      }
+      for (const r of reports) {
+        const key = `${r.gameId}|${r.reportedBy.accountId}`;
+        r.coReported = (byKey[key] || [])
+          .filter(u => u?.accountId && u.accountId !== r.reportedUser?.accountId)
+          .filter((u, i, arr) => arr.findIndex(x => x.accountId === u.accountId) === i);
+      }
+    };
+    
+    // If showAll is true, we want all reports regardless of status
+    const wantAllReports = showAll || (status !== 'pending' && status !== undefined);
+
+    // Get counts by status for dashboard stats
+    const statusCounts = await Report.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const stats = {
+      total: 0,
+      pending: 0,
+      reviewed: 0,
+      dismissed: 0,
+      action_taken: 0
+    };
+
+    statusCounts.forEach(item => {
+      if (item._id in stats) {
+        stats[item._id] = item.count;
+      }
+      stats.total += item.count;
+    });
+
+    // The actionable pending queue (grouped view + its pagination total) excludes
+    // reports whose target was anonymized to null by an account deletion. Count
+    // stats.pending the same way so the dashboard badge matches the queue the mod
+    // can actually drain (total/other statuses stay as full historical counts).
+    stats.pending = await Report.countDocuments({ status: 'pending', 'reportedUser.accountId': { $ne: null } });
+
+    // Get counts by reason for pending reports (for the filter dropdown).
+    // Mirror the grouped-queue guard: anonymized (null-target) reports aren't
+    // actionable and are excluded from the queue, so don't count them here either.
+    const reasonCounts = await Report.aggregate([
+      { $match: { status: 'pending', 'reportedUser.accountId': { $ne: null } } },
+      {
+        $group: {
+          _id: '$reason',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const pendingReasonCounts = {
+      cheating: 0,
+      inappropriate_username: 0,
+      other: 0
+    };
+
+    reasonCounts.forEach(item => {
+      if (item._id in pendingReasonCounts) {
+        pendingReasonCounts[item._id] = item.count;
+      }
+    });
+
+    stats.pendingByReason = pendingReasonCounts;
+
+    // Pending counts by game type (drives the dashboard's game-type filter
+    // dropdown; same anonymized-target guard as the reason counts).
+    const gameTypeCounts = await Report.aggregate([
+      { $match: { status: 'pending', 'reportedUser.accountId': { $ne: null } } },
+      { $group: { _id: '$gameType', count: { $sum: 1 } } }
+    ]);
+    const pendingGameTypeCounts = {
+      ranked_duel: 0,
+      unranked_multiplayer: 0,
+      private_multiplayer: 0,
+      '2v2': 0
+    };
+    gameTypeCounts.forEach(item => {
+      if (item._id in pendingGameTypeCounts) {
+        pendingGameTypeCounts[item._id] = item.count;
+      }
+    });
+    stats.pendingByGameType = pendingGameTypeCounts;
+
+    // For pending reports, we want to group by reported user and order by:
+    // 1. Number of reports against user (descending)
+    // 2. Oldest report date (ascending) - so oldest reports are seen first
+    
+    // If filtering by pending status (and not requesting all), use the special grouping logic
+    if (status === 'pending' && !wantAllReports) {
+      // Build match query for pending reports (including optional reason filter).
+      // Exclude reports whose reported user was anonymized to null by an account
+      // deletion: they have no actionable target, would all collapse into a single
+      // bogus "[Deleted User]" group, and can never be cleared (takeAction rejects
+      // a null targetUserId). The deletion cascade now auto-resolves these, but
+      // this guard also keeps any pre-existing/legacy orphans out of the queue.
+      const pendingMatchQuery = { status: 'pending', 'reportedUser.accountId': { $ne: null } };
+      if (reason && ['inappropriate_username', 'cheating', 'other'].includes(reason)) {
+        pendingMatchQuery.reason = reason;
+      }
+      if (gameType && VALID_GAME_TYPES.includes(gameType)) {
+        pendingMatchQuery.gameType = gameType;
+      }
+      
+      // Get pending reports grouped by reported user
+      const groupedReports = await Report.aggregate([
+        { $match: pendingMatchQuery },
+        {
+          $group: {
+            _id: '$reportedUser.accountId',
+            reportedUser: { $first: '$reportedUser' },
+            reports: { $push: '$$ROOT' },
+            reportCount: { $sum: 1 },
+            oldestReportDate: { $min: '$createdAt' }
+          }
+        },
+        {
+          $sort: {
+            reportCount: -1,      // Users with more reports first
+            oldestReportDate: 1   // Then by oldest report (so old reports aren't forgotten)
+          }
+        },
+        { $skip: skip },
+        { $limit: Math.min(limit, 100) }
+      ]);
+
+      // Get all unique user IDs (reporters and reported users) to fetch their status
+      const reporterIds = new Set();
+      const reportedUserIds = new Set();
+      groupedReports.forEach(group => {
+        reportedUserIds.add(group.reportedUser.accountId);
+        group.reports.forEach(report => {
+          reporterIds.add(report.reportedBy.accountId);
+        });
+      });
+
+      // Fetch reporter stats and status
+      const reporters = await User.find(
+        { _id: { $in: Array.from(reporterIds) } },
+        { _id: 1, username: 1, reporterStats: 1, banned: 1, banType: 1, banExpiresAt: 1, pendingNameChange: 1 }
+      ).lean();
+
+      // Check ban history for all reporters
+      const reporterBanHistory = await ModerationLog.find(
+        {
+          'targetUser.accountId': { $in: Array.from(reporterIds) },
+          actionType: { $in: ['ban_permanent', 'ban_temporary'] }
+        },
+        { 'targetUser.accountId': 1 }
+      ).lean();
+
+      const reportersWithBanHistory = new Set(
+        reporterBanHistory.map(log => log.targetUser.accountId)
+      );
+
+      const reporterDataMap = {};
+      reporters.forEach(reporter => {
+        reporterDataMap[reporter._id.toString()] = {
+          helpfulReports: reporter.reporterStats?.helpfulReports || 0,
+          unhelpfulReports: reporter.reporterStats?.unhelpfulReports || 0,
+          banned: reporter.banned,
+          banType: reporter.banType,
+          banExpiresAt: reporter.banExpiresAt,
+          pendingNameChange: reporter.pendingNameChange,
+          hasBanHistory: reportersWithBanHistory.has(reporter._id.toString())
+        };
+      });
+
+      // Fetch reported user status
+      const reportedUsers = await User.find(
+        { _id: { $in: Array.from(reportedUserIds) } },
+        { _id: 1, banned: 1, banType: 1, banExpiresAt: 1, pendingNameChange: 1 }
+      ).lean();
+
+      const reportedUserDataMap = {};
+      reportedUsers.forEach(user => {
+        reportedUserDataMap[user._id.toString()] = {
+          banned: user.banned,
+          banType: user.banType,
+          banExpiresAt: user.banExpiresAt,
+          pendingNameChange: user.pendingNameChange
+        };
+      });
+
+      // Co-reported linkage across the whole page of groups (one query).
+      await attachCoReported(groupedReports.flatMap(g => g.reports));
+
+      // Enrich reports with reporter stats and status info
+      const enrichedGroups = groupedReports.map(group => ({
+        reportedUser: {
+          ...group.reportedUser,
+          ...reportedUserDataMap[group.reportedUser.accountId]
+        },
+        reportCount: group.reportCount,
+        oldestReportDate: group.oldestReportDate,
+        reports: group.reports.map(report => ({
+          ...report,
+          reporterStats: reporterDataMap[report.reportedBy.accountId] || {
+            helpfulReports: 0,
+            unhelpfulReports: 0
+          },
+          reporterStatus: reporterDataMap[report.reportedBy.accountId] || {}
+        }))
+      }));
+
+      // Get total count of users with pending reports (with optional reason filter)
+      const totalUsersWithPendingReports = await Report.aggregate([
+        { $match: pendingMatchQuery },
+        { $group: { _id: '$reportedUser.accountId' } },
+        { $count: 'total' }
+      ]);
+
+      return res.status(200).json({
+        groupedReports: enrichedGroups,
+        stats,
+        pagination: {
+          total: totalUsersWithPendingReports[0]?.total || 0,
+          limit,
+          skip,
+          hasMore: skip + groupedReports.length < (totalUsersWithPendingReports[0]?.total || 0)
+        },
+        isGrouped: true
+      });
+    }
+
+    // For non-pending status, return flat list (for historical review)
+    const reports = await Report.find(matchQuery)
+      .sort({ createdAt: -1 })
+      .limit(Math.min(limit, 100))
+      .skip(skip)
+      .lean();
+
+    // Get all unique user IDs
+    const reporterIds = [...new Set(reports.map(r => r.reportedBy.accountId))];
+    const reportedUserIds = [...new Set(reports.map(r => r.reportedUser.accountId))];
+    const allUserIds = [...new Set([...reporterIds, ...reportedUserIds])];
+
+    // Fetch user data (stats and status)
+    const users = await User.find(
+      { _id: { $in: allUserIds } },
+      { _id: 1, reporterStats: 1, banned: 1, banType: 1, banExpiresAt: 1, pendingNameChange: 1 }
+    ).lean();
+
+    // Check ban history for all reporters
+    const reporterBanHistory = await ModerationLog.find(
+      {
+        'targetUser.accountId': { $in: reporterIds },
+        actionType: { $in: ['ban_permanent', 'ban_temporary'] }
+      },
+      { 'targetUser.accountId': 1 }
+    ).lean();
+
+    const reportersWithBanHistory = new Set(
+      reporterBanHistory.map(log => log.targetUser.accountId)
+    );
+
+    const userDataMap = {};
+    users.forEach(user => {
+      userDataMap[user._id.toString()] = {
+        helpfulReports: user.reporterStats?.helpfulReports || 0,
+        unhelpfulReports: user.reporterStats?.unhelpfulReports || 0,
+        banned: user.banned,
+        banType: user.banType,
+        banExpiresAt: user.banExpiresAt,
+        pendingNameChange: user.pendingNameChange,
+        hasBanHistory: reportersWithBanHistory.has(user._id.toString())
+      };
+    });
+
+    // Co-reported linkage (one query over the page).
+    await attachCoReported(reports);
+
+    // Enrich reports with reporter stats and status info
+    const enrichedReports = reports.map(report => ({
+      ...report,
+      reporterStats: userDataMap[report.reportedBy.accountId] || {
+        helpfulReports: 0,
+        unhelpfulReports: 0
+      },
+      reporterStatus: userDataMap[report.reportedBy.accountId] || {},
+      reportedUserStatus: userDataMap[report.reportedUser.accountId] || {}
+    }));
+
+    // Get total count for pagination
+    const totalCount = await Report.countDocuments(matchQuery);
+
+    return res.status(200).json({
+      reports: enrichedReports,
+      stats,
+      pagination: {
+        total: totalCount,
+        limit,
+        skip,
+        hasMore: skip + reports.length < totalCount
+      },
+      isGrouped: false
+    });
+
+  } catch (error) {
+    console.error('Get reports error:', error);
+    return res.status(500).json({
+      message: 'An error occurred while fetching reports',
+      error: error.message
+    });
+  }
+}
