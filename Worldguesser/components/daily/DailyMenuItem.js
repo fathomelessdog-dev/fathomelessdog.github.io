@@ -1,0 +1,99 @@
+import React, { useEffect, useState, useRef } from 'react';
+import { useTranslation } from '@/components/useTranslations';
+import config from '@/clientConfig';
+import { getClientLocalDate, msUntilLocalMidnight } from '@/utils/dailyDate';
+import { readDailyStatus, writeDailyStatus } from '@/utils/dailyStatusCache';
+import { getGuestId } from '@/utils/guestId';
+import DailyStreakBadge from './DailyStreakBadge';
+import ModeItem from '@/components/ui/modeItem';
+import { IoCalendarOutline } from 'react-icons/io5';
+
+const AT_RISK_THRESHOLD_MS = 4 * 60 * 60 * 1000;
+
+export default function DailyMenuItem({ session, onClick }) {
+  const { t: text } = useTranslation();
+  // Seed from localStorage so streak/played pill appears the instant the
+  // menu mounts — we still refresh from the API in the background.
+  const [state, setState] = useState(() => {
+    // Scope the cached read to the current identity (secret, else guestId) so a
+    // different account on a shared browser can't seed this pill with the
+    // previous user's streak. See utils/dailyStatusCache.js.
+    const owner = typeof window !== 'undefined'
+      ? (session?.token?.secret || getGuestId() || null)
+      : null;
+    const cached = typeof window !== 'undefined' ? readDailyStatus(getClientLocalDate(), owner) : null;
+    return {
+      streak: cached?.streak || 0,
+      playedToday: !!cached?.playedToday,
+      msToMidnight: typeof window !== 'undefined' ? msUntilLocalMidnight() : 24 * 60 * 60 * 1000,
+    };
+  });
+  const apiUrlRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { apiUrlRef.current = config().apiUrl; } catch { apiUrlRef.current = ''; }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const secret = session?.token?.secret;
+    const today = getClientLocalDate();
+
+    async function load() {
+      if (!apiUrlRef.current) return;
+      // Use secret if logged in; otherwise fall back to guestId so guests
+      // who've played today still see their streak / score pill on the menu,
+      // same as the /results endpoint supports in the hook.
+      const guestId = !secret ? getGuestId() : null;
+      if (!secret && !guestId) {
+        setState(s => ({ ...s, streak: 0, playedToday: false, msToMidnight: msUntilLocalMidnight() }));
+        return;
+      }
+      // lite=1: this pill only reads the caller's own block, so the server
+      // skips the per-date distribution aggregation for it.
+      const params = new URLSearchParams({ date: today, lite: '1' });
+      if (secret) params.set('secret', secret);
+      else params.set('guestId', guestId);
+      try {
+        const res = await fetch(`${apiUrlRef.current}/api/dailyChallenge/results?${params.toString()}`);
+        if (!res.ok) throw new Error('fail');
+        const data = await res.json();
+        if (cancelled) return;
+        setState({
+          streak: data.user?.streak || 0,
+          playedToday: !!data.user?.playedToday,
+          msToMidnight: msUntilLocalMidnight(),
+        });
+        if (data.user) writeDailyStatus(today, data.user, secret || guestId || null);
+      } catch {
+        if (!cancelled) {
+          setState(s => ({ ...s, msToMidnight: msUntilLocalMidnight() }));
+        }
+      }
+    }
+    load();
+    const id = setInterval(() => setState(s => ({ ...s, msToMidnight: msUntilLocalMidnight() })), 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [session?.token?.secret]);
+
+  const atRisk = state.streak > 0 && !state.playedToday && state.msToMidnight <= AT_RISK_THRESHOLD_MS;
+
+  const variant = state.playedToday
+    ? 'done'
+    : atRisk
+      ? 'at-risk'
+      : state.streak > 0
+        ? 'pulsing'
+        : 'default';
+
+  // A row of the home menu (components/ui/modeItem.js); the streak pill
+  // trails the label, as it always did.
+  return (
+    <ModeItem className="home__mode--daily" icon={<IoCalendarOutline />} label={text('dailyChallenge')} onClick={onClick}>
+      {state.streak > 0 && (
+        <DailyStreakBadge streak={state.streak} variant={variant} />
+      )}
+    </ModeItem>
+  );
+}

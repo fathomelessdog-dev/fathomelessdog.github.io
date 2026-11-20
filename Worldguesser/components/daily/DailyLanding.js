@@ -1,0 +1,211 @@
+import React, { useEffect, useState } from 'react';
+import { FaCalendarDay, FaClock, FaTrophy, FaPlay, FaCheck } from 'react-icons/fa';
+import { useTranslation } from '@/components/useTranslations';
+import { formatCountdown, msUntilLocalMidnight } from '@/utils/dailyDate';
+import DailyStreakBadge from './DailyStreakBadge';
+import ScoreDistributionChart from './ScoreDistributionChart';
+import PersonalRecordsCard from './PersonalRecordsCard';
+import DailyHistoryBars14 from './DailyHistoryBars14';
+import DailyLeaderboardModal from './DailyLeaderboardModal';
+import { derivePercentile } from '@/shared/daily/percentile';
+import { HIDE_ACCOUNT_UI, ACCOUNT_SITE_URL, openAccountSite } from '@/components/utils/accountUi';
+
+export default function DailyLanding({ today, distribution = null, userData = null, onStartChallenge, onSignIn, isLoggedIn, animateEntrance = false, ownNameGlow = null, onOpenAbout }) {
+  const { t: text } = useTranslation();
+  const [countdown, setCountdown] = useState(() => msUntilLocalMidnight());
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  useEffect(() => {
+    const id = setInterval(() => setCountdown(msUntilLocalMidnight()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const playedToday = userData?.playedToday;
+  // A DQ'd run counts as played (date locked, streak advanced) but tapping
+  // the CTA opens the "done for today" modal instead of results — swap the
+  // subtitle so it doesn't promise results that aren't there.
+  const disqualifiedToday = !!userData?.disqualifiedToday;
+  // graceDay is only true for logged-in users whose stored streak is alive
+  // today purely because of the unused-grace branch (server-computed in
+  // api/dailyChallenge/results.js). Don't show the warning if they've
+  // already played today.
+  const graceDay = !!userData?.graceDay && !playedToday && (userData?.streak || 0) > 0;
+
+  return (
+    <div className={`daily-landing ${animateEntrance ? 'daily-landing--opening' : ''}`}>
+      <section className="daily-landing-hero">
+        <h1 className="daily-landing-title">{text('dailyLandingTitle')}</h1>
+
+        <button
+          className={`g2_green_button daily-landing-cta ${playedToday ? 'played' : ''}`}
+          onClick={onStartChallenge}
+          aria-label={playedToday ? text(disqualifiedToday ? 'dailyAlreadyDisqualifiedTitle' : 'alreadyPlayedViewResults') : text('openTodaysChallenge')}
+        >
+          {!playedToday && <FaPlay style={{ verticalAlign: '-2px', marginRight: 8 }} />}
+          {playedToday
+            ? text('nextChallengeIn', { time: formatCountdown(countdown) })
+            : text('openTodaysChallenge')}
+          <span className="daily-landing-cta-subtitle">
+            {playedToday
+              ? text(disqualifiedToday ? 'dailyAlreadyDisqualifiedTitle' : 'alreadyPlayedViewResults')
+              : text('nextChallengeIn', { time: formatCountdown(countdown) })}
+          </span>
+        </button>
+
+        {graceDay && (
+          <div className="daily-landing-grace-banner" role="status">
+            {text('dailyLandingGraceDay', { streak: userData.streak })}
+          </div>
+        )}
+
+        <div className="daily-landing-user-stats">
+          {userData?.streak > 0 && (
+            <DailyStreakBadge streak={userData.streak} size="lg" variant={graceDay ? 'at-risk' : (playedToday ? 'done' : 'pulsing')} />
+          )}
+          {/* CoolMath has no login of its own (onSignIn arrives undefined), but
+              it CAN hand the player over to the main site — ACCOUNT_SITE_URL is
+              set only there, and the button opens worldguessr.com in a new tab
+              instead of running OAuth inside the iframe. */}
+          {!isLoggedIn && (!HIDE_ACCOUNT_UI || ACCOUNT_SITE_URL) && (
+            <span style={{ color: 'rgba(255,255,255,0.8)' }}>
+              {userData?.streak > 0
+                ? text('dailyLandingLockInStreak', { streak: userData.streak })
+                : text('dailyLandingLoggedOutPrompt')}
+              {(onSignIn || ACCOUNT_SITE_URL) && (
+                <>
+                  {' '}
+                  <button
+                    className="g2_green_button3"
+                    style={{ padding: '4px 14px', borderRadius: 10, marginLeft: 8 }}
+                    onClick={ACCOUNT_SITE_URL ? openAccountSite : onSignIn}
+                  >
+                    {text('signIn')}{ACCOUNT_SITE_URL ? ' ↗' : ''}
+                  </button>
+                </>
+              )}
+            </span>
+          )}
+        </div>
+      </section>
+
+      <section className="daily-landing-section">
+        <div className="daily-landing-section-title">{text('dailyLandingHowItWorks')}</div>
+        <div className="daily-landing-steps">
+          <div className="daily-landing-step">
+            <FaCalendarDay aria-hidden="true" />
+            <div className="daily-landing-step-text">{text('dailyLandingStep1')}</div>
+          </div>
+          <div className="daily-landing-step">
+            <FaClock aria-hidden="true" />
+            <div className="daily-landing-step-text">{text('dailyLandingStep2')}</div>
+          </div>
+          <div className="daily-landing-step">
+            <FaTrophy aria-hidden="true" />
+            <div className="daily-landing-step-text">{text('dailyLandingStep3')}</div>
+          </div>
+        </div>
+        {/* The page's prose (components/aboutPanel.js) is always in the HTML
+            for crawlers; this is how a player reaches it. Same chip as the
+            leaderboard opener above. */}
+        {onOpenAbout && (
+          <button className="daily-leaderboard-open-btn daily-landing-about-btn" onClick={onOpenAbout}>
+            {text('dailyAboutLink')}
+          </button>
+        )}
+      </section>
+
+      {/* Community pulse — the anonymous distribution stays the headline (an
+          average is a reachable target for beginners); the named top-100 board
+          is deliberately tucked behind an opt-in modal so it isn't the main
+          attraction. Mirrors the results screen's distribution card:
+          hook (pre-play, as a subtitle) → chart (≥10 plays) → meta → standing. */}
+      <section className="daily-landing-section">
+        {/* "How you compare" only makes sense once there's a score to compare —
+            pre-play it's just today's scores. */}
+        <div className="daily-landing-section-title-row">
+          <div className="daily-landing-section-title">
+            {/* DQ days have no own score on the chart, so "how you compare"
+                would be comparing nothing — keep the neutral title. */}
+            {text(playedToday && !disqualifiedToday ? 'dailyScoreDistribution' : 'dailyTodaysScores')}
+          </div>
+          {(distribution?.totalPlays || 0) > 0 && (
+            <button className="daily-leaderboard-open-btn" onClick={() => setShowLeaderboard(true)}>
+              <FaTrophy aria-hidden="true" />
+              {text('dailyViewLeaderboard')}
+            </button>
+          )}
+        </div>
+        {/* Pre-play incentive: the reachable target reads as a subtitle right
+            under the title, not buried below the chart. */}
+        {!playedToday && (distribution?.totalPlays || 0) > 0 && (
+          <div className="daily-distribution-hook">
+            {text('dailyBeatAvgHook', { avg: (distribution.avgScore || 0).toLocaleString() })}
+          </div>
+        )}
+        {(distribution?.totalPlays || 0) > 0 ? (
+          <>
+            {distribution.totalPlays >= 10 ? (
+              <ScoreDistributionChart
+                buckets={distribution.buckets || []}
+                totalPlays={distribution.totalPlays}
+                userScore={playedToday ? userData?.ownScore ?? undefined : undefined}
+              />
+            ) : (
+              <div className="daily-distribution-empty">{text('tooFewPlaysForChart')}</div>
+            )}
+            <div className="daily-distribution-meta">
+              {/* Pre-play the hook subtitle already states the average. */}
+              {playedToday && (
+                <span>{text('averageScoreToday', { avg: distribution.avgScore || 0 })}</span>
+              )}
+              <span>{text('sampleSize', { count: distribution.totalPlays.toLocaleString() })}</span>
+            </div>
+            {(() => {
+              const percentile = playedToday
+                ? derivePercentile(userData?.ownRank, distribution.totalPlays)
+                : null;
+              if (percentile !== null && percentile >= 20) {
+                return (
+                  <div className="daily-distribution-standing">
+                    <span className="daily-distribution-pct">
+                      {text('beatPctPlayers', { pct: percentile })}
+                    </span>
+                    <span className="daily-distribution-rank">
+                      {text('rankOfTotal', { rank: userData.ownRank, total: distribution.totalPlays.toLocaleString() })}
+                    </span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+          </>
+        ) : (
+          <div className="daily-distribution-empty">{text('dailyLandingNoWinnersYet')}</div>
+        )}
+      </section>
+
+      <section className="daily-landing-section">
+        <div className="daily-landing-section-title">{text('dailyHistoryTitle')}</div>
+        <PersonalRecordsCard
+          history={userData?.history || []}
+          streakBest={userData?.streakBest || 0}
+          personalBest={userData?.personalBest || 0}
+          daysPlayed={userData?.daysPlayed || 0}
+        />
+        {(userData?.history?.length || 0) > 0 && (
+          <DailyHistoryBars14 history={userData?.history || []} today={today} />
+        )}
+      </section>
+
+      <DailyLeaderboardModal
+        isOpen={showLeaderboard}
+        onClose={() => setShowLeaderboard(false)}
+        date={today}
+        userData={userData}
+        isLoggedIn={isLoggedIn}
+        ownNameGlow={ownNameGlow}
+        onSignIn={onSignIn ? () => { setShowLeaderboard(false); onSignIn(); } : undefined}
+      />
+    </div>
+  );
+}
