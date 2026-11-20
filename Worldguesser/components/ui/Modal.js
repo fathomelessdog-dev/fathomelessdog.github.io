@@ -1,0 +1,294 @@
+import { useEffect, useState } from 'react';
+
+export default function Modal({
+  isOpen,
+  onClose,
+  title,
+  children,
+  actions = null,
+  variant = "default",
+  disableBackdropClose = false,
+  borderless = false,
+  coveredEntry = false
+}) {
+  // A conditionally mounted open modal must paint on its first render. Starting
+  // false forced an otherwise unnecessary blank commit before every modal.
+  const [isVisible, setIsVisible] = useState(isOpen);
+  const [isClosing, setIsClosing] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setIsVisible(true);
+      setIsClosing(false);
+      if (document.body) document.body.style.overflow = 'hidden';
+    } else if (isVisible) {
+      setIsClosing(true);
+      const timer = setTimeout(() => {
+        setIsVisible(false);
+        setIsClosing(false);
+        if (document.body) document.body.style.overflow = '';
+      }, 200);
+
+      return () => clearTimeout(timer);
+    }
+
+    return () => {
+      if (document.body) document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
+  const handleClose = () => {
+    if (onClose) {
+      onClose();
+    }
+  };
+
+  const handleBackdropClick = (e) => {
+    if (e.target === e.currentTarget && !disableBackdropClose) {
+      handleClose();
+    }
+  };
+
+  if (!isVisible) return null;
+
+  return (
+    <div 
+      className={`modal-backdrop modal-backdrop--${variant} ${coveredEntry && !isClosing ? 'covered-entry' : ''} ${isClosing ? 'closing' : ''}`}
+      onClick={handleBackdropClick}
+    >
+      <div className={`modal ${variant} ${borderless ? 'borderless' : ''} ${isClosing ? 'closing' : ''}`}>
+        {title && (
+          <div className="modal-header">
+            <h2 className="modal-title">{title}</h2>
+            <button className="modal-close" onClick={handleClose}>
+              ×
+            </button>
+          </div>
+        )}
+        
+        <div className="modal-content">
+          {children}
+        </div>
+        
+        {actions && (
+          <div className="modal-actions">
+            {actions}
+          </div>
+        )}
+      </div>
+
+      <style jsx>{`
+        .modal-backdrop {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.75);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+          padding: 20px;
+          animation: fadeIn 0.2s ease-out;
+        }
+
+        .modal-backdrop.closing {
+          /* forwards: hold opacity 0 after the animation ends — the JS unmount
+             timer always lands a frame or two later, and without a fill mode
+             the backdrop snaps back to full opacity in that gap (flicker). */
+          animation: fadeOut 0.2s ease-out forwards;
+        }
+
+        .modal-backdrop.covered-entry {
+          /* The profile's backdrop already owns the pixels underneath this
+             one. Paint an opaque replacement immediately so neither the home
+             page nor the retiring profile can leak through while the shop
+             surface performs its entrance. The destination variant supplies
+             the exact resting background for this class. */
+          animation: none;
+        }
+
+        .modal {
+          /* --washChannels, not a fourth hand-copy of rgba(0, 30, 15): this
+             dialog is rendered INSIDE .settingsPage (settingsModal.js keeps it
+             within its own <Modal>), so it is in the accent scope and follows an
+             equipped background like the page behind it. */
+          background: linear-gradient(135deg, rgba(0, 0, 0, 0.95) 0%, rgba(var(--washChannels), 0.9) 50%, rgba(0, 0, 0, 0.95) 100%);
+          border-radius: 12px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: white;
+          font-family: "Lexend", "Lexend Fallback", sans-serif;
+          max-width: 500px;
+          width: 100%;
+          /* 100% = backdrop's padded box; the backdrop is fixed top/bottom so
+             this tracks the real visible viewport (vh lies on mobile URL bars) */
+          max-height: min(80vh, 100%);
+          overflow: hidden;
+          animation: slideIn 0.2s ease-out;
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+          display: flex;
+          flex-direction: column;
+        }
+
+        .modal.closing {
+          animation: slideOut 0.2s ease-out forwards;
+        }
+
+        .modal.borderless {
+          border: none;
+        }
+
+        .modal.borderless .modal-actions {
+          border-top: none;
+        }
+
+        .modal.error {
+          background: linear-gradient(135deg, rgba(156, 82, 39, 0.95) 0%, rgba(91, 29, 29, 0.9) 100%);
+          border-color: rgba(220, 53, 69, 0.3);
+        }
+
+        .modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          padding: 20px 24px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          flex-shrink: 0;
+        }
+
+        .modal-title {
+          margin: 0;
+          font-size: 1.5rem;
+          font-weight: 600;
+          color: white;
+          min-width: 0;
+          overflow-wrap: break-word;
+        }
+
+        .modal-close {
+          background: rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          color: white;
+          border-radius: 50%;
+          width: 32px;
+          height: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 18px;
+          transition: all 0.2s ease;
+          flex-shrink: 0;
+        }
+
+        .modal-close:hover {
+          background: rgba(255, 255, 255, 0.2);
+          transform: rotate(90deg);
+        }
+
+        .modal-content {
+          padding: 24px;
+          overflow-y: auto;
+          flex: 1;
+          min-height: 0;
+          overflow-wrap: break-word;
+        }
+
+        .modal-actions {
+          padding: 16px 24px 24px;
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+          flex-shrink: 0;
+        }
+
+        .modal-actions :global(button) {
+          /* The two site base tones, referenced rather than restated: this ramp
+             was the surface colour into the wash colour, written out as two hex
+             literals that no longer matched anything if either base moved. */
+          background: linear-gradient(135deg, rgba(var(--surfChannels), 0.9) 0%, rgba(var(--r), var(--g), var(--b), 0.8) 100%);
+          color: white;
+          border: 2px solid var(--primary);
+          border-radius: 8px;
+          padding: 10px 20px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          font-family: "Lexend", "Lexend Fallback", sans-serif;
+        }
+
+        .modal-actions :global(button:hover) {
+          background: linear-gradient(135deg, rgba(var(--surfChannels), 1) 0%, rgba(var(--surfChannels), 0.9) 100%);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(var(--surfChannels), 0.4);
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes fadeOut {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+
+        @keyframes slideIn {
+          from {
+            transform: scale(0.9) translateY(30px);
+            opacity: 0;
+          }
+          to {
+            transform: scale(1) translateY(0);
+            opacity: 1;
+          }
+        }
+
+        @keyframes slideOut {
+          from {
+            transform: scale(1) translateY(0);
+            opacity: 1;
+          }
+          to {
+            transform: scale(0.9) translateY(-30px);
+            opacity: 0;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .modal-backdrop {
+            padding: 12px;
+          }
+
+          .modal {
+            /* the backdrop's padding is the only inset — margins here made the
+               modal overflow the centered flex box and clipped the header/X */
+            margin: 0;
+            max-width: 100%;
+            max-height: 100%;
+          }
+          
+          .modal-header {
+            padding: 16px 20px;
+          }
+          
+          .modal-content {
+            padding: 20px;
+          }
+          
+          .modal-actions {
+            padding: 12px 20px 20px;
+          }
+          
+          .modal-title {
+            font-size: 1.25rem;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
