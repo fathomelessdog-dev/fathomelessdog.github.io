@@ -1,0 +1,156 @@
+import User from '../models/User.js';
+import UserStats from '../models/UserStats.js';
+import ModerationLog from '../models/ModerationLog.js';
+import Report from '../models/Report.js';
+
+/**
+ * User Moderation Data API
+ * 
+ * Returns moderation-related data for a user's own account:
+ * - ELO refunds they received (from banned players)
+ * - Moderation actions against them (public notes only, no internal reasons)
+ * - Reports they submitted and their status
+ * 
+ * Does NOT return:
+ * - Reports against them (for security)
+ * - Internal moderator notes
+ * - Details about what action was taken on their reports
+ */
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method not allowed' });
+  }
+
+  const { secret } = req.body;
+
+  if (!secret || typeof secret !== 'string') {
+    return res.status(400).json({ message: 'Authentication required' });
+  }
+
+  try {
+    // Find user by secret
+    const user = await User.findOne({ secret });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid authentication' });
+    }
+
+    const accountId = user._id.toString();
+
+    // 1. Get ELO refunds from UserStats
+    const eloRefunds = await UserStats.find({
+      userId: accountId,
+      triggerEvent: 'elo_refund'
+    })
+      .sort({ timestamp: -1 })
+      .limit(100)
+      .lean();
+
+    // Format ELO refunds for frontend
+    const formattedRefunds = eloRefunds.map(refund => ({
+      id: refund._id,
+      amount: refund.eloRefundDetails?.amount || 0,
+      bannedUsername: refund.eloRefundDetails?.bannedUsername || 'Unknown',
+      date: refund.timestamp,
+      newElo: refund.elo
+    }));
+
+    // 2. Get moderation actions against this user (public info only)
+    // Single source of truth: action types the user may see, mapped to their public
+    // descriptions. Anything not in this map never reaches the client — there is no
+    // generic fallback label. Excluded:
+    // - name_change_manual: the user's own voluntary rename (audit trail, not an action against them)
+    // - report_ignored / report_resolved: stamped with targetUser = reported user, so
+    //   showing them would leak the existence of reports against the user
+    // - user_deleted: account is gone, entry is moot
+    const USER_VISIBLE_ACTIONS = {
+      ban_permanent: 'Account suspended',
+      ban_temporary: 'Account temporarily suspended',
+      unban: 'Account suspension lifted',
+      force_name_change: 'Username change required',
+      undo_force_name_change: 'Username change requirement lifted',
+      name_change_approved: 'Username change approved',
+      name_change_rejected: 'Username change rejected',
+      warning: 'Warning issued'
+    };
+    const moderationHistory = await ModerationLog.find({
+      'targetUser.accountId': accountId,
+      actionType: { $in: Object.keys(USER_VISIBLE_ACTIONS) }
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Format moderation history - only show public information
+    const formattedModerationHistory = moderationHistory.map(log => ({
+      id: log._id,
+      actionType: log.actionType,
+      actionDescription: USER_VISIBLE_ACTIONS[log.actionType],
+      publicNote: log.notes || null, // Only the public note, never the internal reason
+      date: log.createdAt,
+      expiresAt: log.expiresAt || null, // For temp bans
+      durationString: log.durationString || null
+    }));
+
+    // 3. Get reports submitted by this user
+    const submittedReports = await Report.find({
+      'reportedBy.accountId': accountId
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Format submitted reports - only show basic status, no details
+    const formattedReports = submittedReports.map(report => {
+      // Simplified status for users
+      let displayStatus;
+      switch (report.status) {
+        case 'pending':
+        case 'reviewed': // Still being reviewed
+          displayStatus = 'open';
+          break;
+        case 'dismissed':
+          displayStatus = 'ignored';
+          break;
+        case 'action_taken':
+          displayStatus = 'action_taken';
+          break;
+        default:
+          displayStatus = 'open';
+      }
+
+      return {
+        id: report._id,
+        reportedUsername: report.reportedUser.username,
+        reason: report.reason,
+        status: displayStatus,
+        date: report.createdAt
+        // Intentionally NOT including: description, actionTaken, moderatorNotes
+      };
+    });
+
+    // Calculate summary stats
+    const totalEloRefunded = formattedRefunds.reduce((sum, r) => sum + r.amount, 0);
+    const reportsResultingInAction = formattedReports.filter(r => r.status === 'action_taken').length;
+
+    return res.status(200).json({
+      eloRefunds: formattedRefunds,
+      totalEloRefunded,
+      moderationHistory: formattedModerationHistory,
+      submittedReports: formattedReports,
+      reportStats: {
+        total: formattedReports.length,
+        open: formattedReports.filter(r => r.status === 'open').length,
+        ignored: formattedReports.filter(r => r.status === 'ignored').length,
+        actionTaken: reportsResultingInAction
+      }
+    });
+
+  } catch (error) {
+    console.error('User moderation data error:', error);
+    return res.status(500).json({ 
+      message: 'An error occurred', 
+      error: error.message 
+    });
+  }
+}
+

@@ -1,0 +1,411 @@
+import User, { USERNAME_COLLATION, STARTING_ELO } from '../models/User.js';
+import DailyLeaderboard from '../models/DailyLeaderboard.js';
+import { registerStat } from '../serverUtils/statRegistry.js';
+import { MIGRATION_AT } from '../components/utils/ratingFlags.js';
+import { rankQueryRating } from '../components/utils/eloSystem.js';
+
+// Cache for leaderboard data
+const CACHE_DURATION = 60000; // 1 minute cache
+const cache = new Map();
+registerStat('api/leaderboard.cache', () => cache.size);
+
+/**
+ * ALL-TIME RANKED BOARD: 14-DAY ACTIVITY WINDOW
+ *
+ * Rating v2 is a competitive ladder, so a rating is only meaningful while its
+ * owner is still putting it at risk. Under the old inflating ladder a player
+ * could stop playing at 20,000 and sit on the board forever; under v2 the top
+ * would freeze solid within weeks, occupied by accounts that can no longer lose.
+ *
+ * THIS IS A QUERY-SIDE FILTER AND NOTHING ELSE. It hides rows. It NEVER writes,
+ * never decays and never touches a rating — an inactive player's number is
+ * exactly where they left it, and the row comes back BY ITSELF on their next
+ * ranked game, because api/eloRank.js stamps `lastRankedAt` on every rated
+ * result (setFields.lastRankedAt / the placement-seed $set). There is no
+ * restore job to run and nothing to un-hide.
+ *
+ * `lastRankedAt: null` is included in the hidden set on purpose: it means the
+ * account has not completed a ranked game since the field shipped, which is the
+ * same "not currently competing" state as a stale date.
+ *
+ * XP IS DELIBERATELY EXEMPT. Total XP is a lifetime accumulation, not a
+ * contested position — hiding a dormant player's XP would be deleting a record,
+ * not de-listing a competitor. Only the ranked (elo) all-time board filters.
+ * The daily boards are already inherently active-only.
+ */
+const RANKED_ACTIVITY_WINDOW_DAYS = 14;
+const RANKED_ACTIVITY_WINDOW_MS = RANKED_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * THE MIGRATION-DAY GRACE. READ THIS BEFORE CHANGING ANY OF IT.
+ *
+ * `lastRankedAt` is a NEW field with `default: null`, and
+ * scripts/migrateRatingV2.js does NOT backfill it — its one $set writes elo,
+ * ratedGames, seasonPeakElo and seasonPeakLeague, and nothing else. So the
+ * instant v2 ships, every pre-existing account on the site has a null here.
+ *
+ * Apply the window naively on day one and the all-time ranked leaderboard is
+ * EMPTY. Not short. Empty. For everybody, on the most scrutinised day of the
+ * release, on a page that is a top-level nav item.
+ *
+ * A null lastRankedAt before the window has elapsed is not evidence of
+ * dormancy — it is evidence that the field never had the chance to be stamped.
+ * So the filter does not switch on until the site has been on v2 for a full
+ * RANKED_ACTIVITY_WINDOW_DAYS, by which point every player who is still playing
+ * has been stamped by api/eloRank.js setElo() and the transition is invisible.
+ *
+ * TWO WAYS THIS STAYS OFF, both failing towards "show the board":
+ *   - MIGRATION_AT null  we cannot know how long we have been live. Note this
+ *                        is the OPPOSITE polarity to placementGates.js, where
+ *                        null fails closed: there, closed means "grant nothing",
+ *                        which is safe. Here, closed would mean "hide everyone",
+ *                        which is the outage. Safe direction, not fixed polarity.
+ *   - inside the grace   fewer than 14 days since migration.
+ *
+ * If someone later backfills lastRankedAt in the migration, this grace becomes a
+ * no-op rather than a bug — it just stops mattering.
+ */
+function rankedActivityFilterActive() {
+  if (!MIGRATION_AT || Number.isNaN(MIGRATION_AT.getTime())) return false;
+  return Date.now() - MIGRATION_AT.getTime() >= RANKED_ACTIVITY_WINDOW_MS;
+}
+
+/** Mongo filter for "has finished a ranked match inside the window". */
+function activeRankedFilter() {
+  return { lastRankedAt: { $gte: new Date(Date.now() - RANKED_ACTIVITY_WINDOW_MS) } };
+}
+
+/**
+ * The 60s cache below is keyed by mode+period, and the activity cutoff moves
+ * every second. That is fine and deliberate: a row can be at most CACHE_DURATION
+ * stale on the way out, and a returning player's row reappears within 60s of
+ * their first ranked finish. What is NOT fine is the key colliding with a list
+ * cached under the OTHER filtering regime — which happens exactly once, at the
+ * moment the grace above expires, and would otherwise pin a stale unfiltered
+ * list for a minute. So the key carries the filter state.
+ */
+function getCacheKey(mode, pastDay, filtered) {
+  const suffix = filtered ? `_active${RANKED_ACTIVITY_WINDOW_DAYS}d` : '';
+  return `${mode}_${pastDay ? 'daily' : 'alltime'}${suffix}`;
+}
+
+function getCachedData(key) {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.data;
+  }
+  return null;
+}
+
+function setCachedData(key, data) {
+  // The per-score rank-count keys below make this map grow without bound;
+  // sweep dead entries once it passes a size no minute of traffic reaches.
+  if (cache.size > 1000) {
+    for (const [k, v] of cache) {
+      if (Date.now() - v.timestamp >= CACHE_DURATION) cache.delete(k);
+    }
+  }
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
+/**
+ * The equipped name glow is public presentation, same class of fact as the
+ * country flag beside it, and every board that prints a username has to be able
+ * to print it or a purchase is invisible on the page a player is proudest of.
+ *
+ * FREE ON THIS PATH: the all-time board already pulls whole User documents, so
+ * the sku is sitting in `user` and costs one property read. The daily path is
+ * the one that has to work for it — see attachDailyGlows.
+ */
+function sendableUser(user) {
+  if (!user.username) {
+    return null;
+  }
+  return {
+    username: user.username,
+    countryCode: user.countryCode || null,
+    nameGlow: user.cosmetics?.equipped?.nameGlow || null,
+    totalXp: user.totalXp ?? user.xpGained ?? 0,
+    createdAt: user.created_at,
+    gamesLen: user.totalGamesPlayed ?? 0,
+    elo: user.elo ?? STARTING_ELO,
+    eloToday: user.elo_today ?? 0,
+  };
+}
+
+/**
+ * Stamp equipped glows onto rows that came out of the pre-computed daily board.
+ *
+ * ONE QUERY FOR THE WHOLE PAGE, and it only runs on a cache miss (the caller
+ * caches the finished array for CACHE_DURATION), so this is one lookup a minute
+ * per mode, not one per request and never one per row.
+ *
+ * RESOLVED LIVE, NOT BAKED INTO THE SNAPSHOT. The DailyLeaderboard collection is
+ * written once at midnight by the cron; freezing the sku there would mean a glow
+ * equipped at 9am does not appear on the daily board until tomorrow, on the
+ * board a player checks most often. A cosmetic is current identity, not part of
+ * the day's result.
+ *
+ * Failure is silent and total: a lookup that throws leaves every row un-glowed,
+ * which is exactly what the page rendered yesterday. A leaderboard must not 500
+ * over a decoration.
+ */
+async function attachDailyGlows(rows) {
+  const ids = rows.map((r) => r.userId).filter(Boolean);
+  if (!ids.length) return rows;
+  try {
+    const users = await User.find({ _id: { $in: ids } })
+      .select('_id cosmetics.equipped.nameGlow')
+      .lean()
+      .maxTimeMS(2000);
+    const glowById = new Map(
+      users.map((u) => [u._id.toString(), u.cosmetics?.equipped?.nameGlow || null]),
+    );
+    for (const row of rows) row.nameGlow = glowById.get(row.userId) || null;
+  } catch (e) {
+    console.warn('[LEADERBOARD] glow lookup failed (non-critical):', e.message);
+  }
+  return rows;
+}
+
+// Load pre-computed daily leaderboard from DailyLeaderboard collection
+async function getDailyLeaderboard(isXp = true) {
+  const mode = isXp ? 'xp' : 'elo';
+  const now = new Date();
+
+  // Get today's midnight UTC for consistent lookups
+  const todayMidnight = new Date(now);
+  todayMidnight.setUTCHours(0, 0, 0, 0);
+
+  // Fetch pre-computed leaderboard (fast query with date+mode index)
+  const precomputedLeaderboard = await DailyLeaderboard.findOne({
+    date: todayMidnight,
+    mode: mode
+  }).lean().maxTimeMS(2000);
+
+  if (!precomputedLeaderboard) {
+    console.warn('[LEADERBOARD] Pre-computed daily leaderboard not found');
+    return { leaderboard: [] };
+  }
+
+  // Transform pre-computed data to match expected format (only top 100 for display)
+  const leaderboard = precomputedLeaderboard.leaderboard.slice(0, 100).map(entry => ({
+    username: entry.username,
+    countryCode: entry.countryCode || null,
+    totalXp: isXp ? entry.delta : entry.currentValue,
+    createdAt: null,
+    gamesLen: 0,
+    elo: isXp ? entry.currentValue : entry.delta,
+    eloToday: entry.delta,
+    rank: entry.rank,
+    // Carried through the map purely so attachDailyGlows has something to join
+    // on, then dropped — the client never sees it.
+    userId: entry.userId,
+  }));
+
+  await attachDailyGlows(leaderboard);
+  for (const row of leaderboard) delete row.userId;
+
+  return { leaderboard };
+}
+
+// Get user's position from pre-computed daily leaderboard (top 50k)
+async function getUserDailyRank(username, isXp = true) {
+  const user = await User.findOne({ username: username }).collation(USERNAME_COLLATION).maxTimeMS(2000);
+  if (!user) return { rank: null, delta: null };
+
+  const mode = isXp ? 'xp' : 'elo';
+  const now = new Date();
+
+  // Get today's midnight UTC
+  const todayMidnight = new Date(now);
+  todayMidnight.setUTCHours(0, 0, 0, 0);
+
+  // Fetch pre-computed leaderboard (contains top 50k users)
+  const precomputedLeaderboard = await DailyLeaderboard.findOne({
+    date: todayMidnight,
+    mode: mode
+  }).lean().maxTimeMS(2000);
+
+  if (!precomputedLeaderboard) {
+    return { rank: null, delta: null };
+  }
+
+  // Find user in pre-computed leaderboard (searches through top 50k)
+  const userEntry = precomputedLeaderboard.leaderboard.find(
+    entry => entry.userId === user._id.toString()
+  );
+
+  if (userEntry) {
+    return { rank: userEntry.rank, delta: userEntry.delta };
+  }
+
+  // User not in top 50k - no activity or very low delta
+  return { rank: null, delta: null };
+}
+
+export default async function handler(req, res) {
+  const myUsername = req.query.username;
+  const pastDay = req.query.pastDay === 'true';
+  const isXp = req.query.mode === 'xp';
+  // Viewer opt-in to see the rows the activity window hides. Query-side only,
+  // like the window itself: same unfiltered list the board served before the
+  // window opened (and the same cache entry).
+  const includeInactive = req.query.includeInactive === 'true';
+  console.log(`[API] leaderboard: mode=${isXp ? 'xp' : 'elo'}, pastDay=${pastDay}, user=${myUsername || 'none'}${includeInactive ? ', includeInactive' : ''}`);
+
+  // Prevent NoSQL injection - username must be a string if provided
+  if (myUsername && typeof myUsername !== 'string') {
+    return res.status(400).json({ message: 'Invalid username' });
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ message: 'Method not allowed' });
+  }
+
+  try {
+    // One decision, read everywhere below, so the query, the rank count, the
+    // cache key and the client note can never disagree about whether the window
+    // is in force.
+    // windowActive: the rule is in force on this board (drives the note and
+    // the toggle). windowApplies: rows are actually being filtered right now.
+    const windowActive = !isXp && !pastDay && rankedActivityFilterActive();
+    const windowApplies = windowActive && !includeInactive;
+    const cacheKey = getCacheKey(isXp ? 'xp' : 'elo', pastDay, windowApplies);
+    let leaderboard = getCachedData(cacheKey);
+    let myRank = null;
+    let myScore = null;
+
+    if (!leaderboard) {
+      if (pastDay) {
+        // Daily leaderboard from pre-computed DailyLeaderboard collection
+        const dailyResult = await getDailyLeaderboard(isXp);
+        leaderboard = dailyResult.leaderboard;
+        setCachedData(cacheKey, leaderboard);
+      } else {
+        // All-time leaderboard
+        const sortField = isXp ? 'totalXp' : 'elo';
+        const topUsers = await User.find({
+          banned: false,
+          pendingNameChange: { $ne: true },
+          // Ranked board only, and only once the grace has elapsed — see
+          // RANKED_ACTIVITY_WINDOW_DAYS. Spread so the XP board's query (and
+          // every query before the window opens) is byte-for-byte what it was.
+          ...(windowApplies ? activeRankedFilter() : {})
+        })
+          .sort({ [sortField]: -1 })
+          .limit(100)
+          .lean()
+          .maxTimeMS(5000);
+
+        leaderboard = topUsers.map(sendableUser).filter(user => user !== null);
+        setCachedData(cacheKey, leaderboard);
+      }
+    }
+
+    // Get user's rank and score
+    let myCountryCode = null;
+    // The viewer's own glow, for the "Your Rank" card. It cannot be read off
+    // `leaderboard` — the whole point of that card is that the viewer is usually
+    // NOT in the top 100.
+    let myNameGlow = null;
+    // True when the VIEWER is the one being hidden by the activity window. The
+    // page needs this: without it they get a "Your Rank #12" card above a list
+    // they are not in, which reads as a bug rather than as a consequence.
+    let myRankHidden = false;
+    if (myUsername) {
+      if (pastDay) {
+        const userResult = await getUserDailyRank(myUsername, isXp);
+        myRank = userResult.rank;
+        myScore = userResult.delta;
+        // One extra projected field on a query this branch already makes.
+        const user = await User.findOne({ username: myUsername }).collation(USERNAME_COLLATION).select('countryCode cosmetics.equipped.nameGlow').maxTimeMS(2000);
+        myCountryCode = user?.countryCode || null;
+        myNameGlow = user?.cosmetics?.equipped?.nameGlow || null;
+      } else {
+        // All-time ranking
+        const user = await User.findOne({ username: myUsername }).collation(USERNAME_COLLATION).maxTimeMS(2000);
+        if (user) {
+          myCountryCode = user.countryCode || null;
+          myNameGlow = user.cosmetics?.equipped?.nameGlow || null;
+          const sortField = isXp ? 'totalXp' : 'elo';
+          myScore = user[sortField];
+          if (myScore) {
+            // THE 670 BASELINE FLOOR APPLIES ONLY WHEN THE GHOST MASS IS IN
+            // THE COUNTED POPULATION, which is exactly when the activity
+            // window is NOT filtering. The floor exists to stop ~3.7M
+            // never-played accounts at 670 from swallowing a player who dips
+            // below it (see serverUtils/eloRankQuery.js). Once the window is
+            // on, those accounts are already excluded by lastRankedAt, and
+            // flooring anyway would merge genuinely different ACTIVE players
+            // (say 500 and 670) onto one rank and break the invariant below.
+            // XP is exempt: different mass, and a lifetime total is not a
+            // contested position.
+            const comparedScore = (!isXp && !windowApplies)
+              ? rankQueryRating(myScore)
+              : myScore;
+            // Self-correcting 60s cache: the viewer's own score is IN the key,
+            // so their own rating change always misses and recounts — only
+            // OTHER players' movement can go stale, and the board list above
+            // already carries the same 60s staleness. Counting 1.7M-4.5M index
+            // keys is inherent to a live count, so the cache is what makes the
+            // XP and unfiltered variants cheap.
+            const countCacheKey = `rankcount_${sortField}_${comparedScore}_${windowApplies}`;
+            let betterUsersCount = getCachedData(countCacheKey);
+            if (betterUsersCount === null) {
+              const countQuery = User.countDocuments({
+                [sortField]: { $gt: comparedScore },
+                banned: false,
+                // COUNT THE SAME POPULATION THE LIST SHOWS. Without this the rank
+                // card said "#12" while the player sat 8th in the visible rows,
+                // because the count still included everyone the window hid.
+                // pendingNameChange joined Sep 1 2026 for the same reason: the
+                // list has always excluded those rows, the count never did.
+                pendingNameChange: { $ne: true },
+                ...(windowApplies ? activeRankedFilter() : {})
+              }).maxTimeMS(5000);
+              if (windowApplies) {
+                // Planner fix, measured Sep 1 2026: left alone the planner picks
+                // the bare {elo:-1} index and walks 4.48M documents (5.2s) to
+                // apply the window filter; the ESR compound answers the same
+                // count over ~45k index keys in 18ms. Hint only this variant —
+                // it is the measured one, and the index is defined in User.js.
+                countQuery.hint({ banned: 1, pendingNameChange: 1, elo: -1, lastRankedAt: 1 });
+              }
+              betterUsersCount = await countQuery;
+              setCachedData(countCacheKey, betterUsersCount);
+            }
+            myRank = betterUsersCount + 1;
+          }
+          if (windowApplies) {
+            const cutoff = Date.now() - RANKED_ACTIVITY_WINDOW_MS;
+            myRankHidden = !user.lastRankedAt || new Date(user.lastRankedAt).getTime() < cutoff;
+          }
+        }
+      }
+    }
+
+    const responseKey = isXp ? 'myXp' : 'myElo';
+    // `activityWindowDays` is present ONLY when the window is in force on this
+    // board. Both clients render the explanatory note and the show/hide toggle
+    // off its presence, so during the migration grace they say nothing rather
+    // than promising a rule that is not yet in force — and neither client needs
+    // to know the rule to get it right. `inactiveShown` says which state the
+    // rows are in; `myRankHidden` can only be true while they are filtered.
+    return res.status(200).json({
+      leaderboard,
+      myRank,
+      myCountryCode,
+      myNameGlow,
+      [responseKey]: myScore,
+      ...(windowActive ? { activityWindowDays: RANKED_ACTIVITY_WINDOW_DAYS, inactiveShown: includeInactive, myRankHidden } : {})
+    });
+
+  } catch (error) {
+    console.error('Leaderboard API error:', error);
+    return res.status(500).json({
+      message: 'An error occurred',
+      error: error.message
+    });
+  }
+}

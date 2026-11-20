@@ -1,0 +1,253 @@
+import jwt from "jsonwebtoken";
+const { verify } = jwt;
+import axios from "axios";
+import { createUUID } from "../components/createUUID.js";
+import User, { USERNAME_COLLATION, STARTING_ELO } from "../models/User.js";
+import timezoneToCountry from "../serverUtils/timezoneToCountry.js";
+import cachegoose from 'recachegoose';
+import { getLeague } from '../components/utils/leagues.js';
+import { STARTING_ELO as DEFAULT_ELO } from '../components/utils/ratingFlags.js';
+import { computeEloRank } from '../serverUtils/eloRankQuery.js';
+import { findBannedIdentity, bannedIdentityMessage } from '../serverUtils/bannedIdentities.js';
+import { entitlementFields, defaultEntitlementFields } from './stampShop.js';
+import { hasSeason0, season0RankOf } from '../shared/season0/rank.js';
+
+const USERNAME_CHANGE_COOLDOWN = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+// The user lookup below is cached for 120s under an EXPLICIT key,
+// `crazyAuth_${crazyGamesId}`. The key is not decoration: a keyless .cache()
+// generates its own internal key, which nothing outside recachegoose can name,
+// and clearCache() then has nothing to target — a CrazyGames player's purchase
+// would stay invisible to them for the full 120 seconds. api/stampShop.js
+// clears exactly this key (see its cache-chain header). Keep the two in sync.
+
+// In-memory cache for CrazyGames public key (1 hour TTL)
+let cachedPublicKey = null;
+let publicKeyCacheTime = 0;
+const PUBLIC_KEY_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+async function getCrazyGamesPublicKey() {
+  const now = Date.now();
+  if (cachedPublicKey && (now - publicKeyCacheTime) < PUBLIC_KEY_CACHE_TTL) {
+    return cachedPublicKey;
+  }
+  const resp = await axios.get("https://sdk.crazygames.com/publicKey.json");
+  cachedPublicKey = resp.data["publicKey"];
+  publicKeyCacheTime = now;
+  return cachedPublicKey;
+}
+
+/**
+ * Get extended user data (publicAccount + eloRank data) for combined response
+ */
+async function getExtendedUserData(user, timings = {}) {
+  const startExtended = Date.now();
+
+  // publicAccount data
+  const lastNameChange = user.lastNameChange ? new Date(user.lastNameChange).getTime() : 0;
+  const publicData = {
+    totalXp: user.totalXp || 0,
+    createdAt: user.created_at,
+    gamesLen: user.totalGamesPlayed || 0,
+    lastLogin: user.lastLogin || user.created_at,
+    canChangeUsername: !user.lastNameChange || Date.now() - lastNameChange > USERNAME_CHANGE_COOLDOWN,
+    daysUntilNameChange: lastNameChange ? Math.max(0, Math.ceil((lastNameChange + USERNAME_CHANGE_COOLDOWN - Date.now()) / (24 * 60 * 60 * 1000))) : 0,
+    recentChange: user.lastNameChange ? Date.now() - lastNameChange < 24 * 60 * 60 * 1000 : false,
+    // Season 0 commemorative fields — same set and same reason as the identical
+    // block in api/googleAuth.js. A CrazyGames-linked veteran gets the same
+    // badges on their own profile as a Google-linked one. The query above is an
+    // unprojected findOne, so every column is already loaded.
+    seasonPeakElo: user.seasonPeakElo ?? user.elo_s0 ?? null,
+    seasonPeakLeague: user.seasonPeakLeague || null,
+    season0Elo: user.elo_s0 ?? null,
+    season0Rank: season0RankOf(user),
+    ogAccount: hasSeason0(user),
+  };
+
+  // eloRank data
+  const startRank = Date.now();
+  const rank = await computeEloRank(user.elo || DEFAULT_ELO);
+
+  timings.rankQuery = Date.now() - startRank;
+
+  const eloData = {
+    elo: user.elo || DEFAULT_ELO,
+    rank,
+    league: getLeague(user.elo || DEFAULT_ELO),
+    duels_wins: user.duels_wins || 0,
+    duels_losses: user.duels_losses || 0,
+    duels_tied: user.duels_tied || 0,
+    win_rate: (user.duels_wins || 0) / ((user.duels_wins || 0) + (user.duels_losses || 0) + (user.duels_tied || 0)) || 0
+  };
+
+  timings.extendedData = Date.now() - startExtended;
+
+  // Entitlements (stamps / cosmetics / adFreeUntil / stampsEnabled) ride along
+  // with the response that spreads this object. stampsEnabled is
+  // SERVER-delivered, never a client build constant.
+  return { ...publicData, ...eloData, ...entitlementFields(user) };
+}
+
+export default async function handler(req, res) {
+  const timings = {};
+  const startTotal = Date.now();
+  // only accept post
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  const { token, username } = req.body;
+  if (!token || !username) {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+
+  // make sure they are strings
+  if (typeof token !== 'string' || typeof username !== 'string') {
+    return res.status(400).json({ error: 'Invalid input' });
+  }
+
+  let decodedToken;
+  try {
+    const publicKey = await getCrazyGamesPublicKey();
+    decodedToken = verify(token, publicKey, { algorithms: ["RS256"] });
+  } catch (error) {
+    return res.status(400).json({ error: 'Invalid token' });
+  }
+
+  const { userId } = decodedToken;
+
+  // check if userId exists
+  timings.authType = 'existing_user_check';
+  const startUserLookup = Date.now();
+  const user = await User.findOne({ crazyGamesId: userId }).cache(120, `crazyAuth_${userId}`);
+  timings.userLookup = Date.now() - startUserLookup;
+
+  if (user) {
+    // Auto-assign country code from timezone if not set (lazy migration)
+    // Use == null to catch both null and undefined (for users without the field)
+    if (user.countryCode == null && user.timeZone) {
+      const countryCode = timezoneToCountry(user.timeZone);
+      if (countryCode) {
+        await User.findByIdAndUpdate(user._id, { countryCode });
+        user.countryCode = countryCode;
+
+        // Clear auth cache to ensure fresh data on next request
+        cachegoose.clearCache(`crazyAuth_${userId}`, (error) => {
+          if (error) {
+            console.error('Error clearing auth cache after country code update:', error);
+          }
+        });
+      }
+    }
+
+    // Get extended user data (publicAccount + eloRank)
+    const extendedData = await getExtendedUserData(user, timings);
+
+    timings.total = Date.now() - startTotal;
+    console.log('[crazyAuth] Timings (ms):', JSON.stringify(timings));
+
+    return res.status(200).json({
+      secret: user.secret,
+      username: user.username,
+      email: user.email,
+      staff: user.staff,
+      canMakeClues: user.canMakeClues,
+      accountId: user._id,
+      countryCode: user.countryCode || null,
+      banned: user.banned || false,
+      banType: user.banType || 'none',
+      banExpiresAt: user.banExpiresAt || null,
+      banPublicNote: user.banPublicNote || null,
+      pendingNameChange: user.pendingNameChange || false,
+      pendingNameChangePublicNote: user.pendingNameChangePublicNote || null,
+      pendingDeletion: !!user.scheduledDeletionAt,
+      scheduledDeletionAt: user.scheduledDeletionAt || null,
+      // Extended data (publicAccount + eloRank combined)
+      ...extendedData
+    });
+  }
+
+  // Refuse re-registration of a blocklisted (perm-banned/deleted) identity before
+  // creating a fresh CrazyGames account.
+  const blocked = await findBannedIdentity({ crazyGamesId: userId });
+  if (blocked) {
+    timings.total = Date.now() - startTotal;
+    console.log('[crazyAuth] blocked banned identity re-signup:', JSON.stringify(timings));
+    return res.status(403).json({
+      error: bannedIdentityMessage(blocked),
+      banned: true,
+      banType: 'permanent',
+    });
+  }
+
+  // check if username is taken
+  let newUsername = username.substring(0, 30).replace(/[^a-zA-Z0-9_]/g, '');
+  let finalUsername = newUsername;
+  let taken = true;
+  let trial = 0;
+  while (taken) {
+    const existing = await User.findOne({ username: finalUsername }).collation(USERNAME_COLLATION);
+    if (!existing) {
+      taken = false;
+    } else {
+      trial++;
+      finalUsername = `${newUsername}${trial}`;
+    }
+  }
+
+  // create new user
+  timings.isNewUser = true;
+  // Note: countryCode is left as null (schema default) for new users.
+  // We don't auto-assign based on timeZone here because timeZone defaults to
+  // 'America/Los_Angeles', which would incorrectly assign all new users to 'US'.
+  // Users can manually set their country flag later in their profile.
+  const secret = createUUID();
+  const newUser = new User({ crazyGamesId: userId, username: finalUsername, secret });
+
+  const startSave = Date.now();
+  await newUser.save();
+  timings.newUserCreate = Date.now() - startSave;
+
+  // Default extended data for new users
+  // Rank = count of users with elo > the starting rating + 1
+  const startRank = Date.now();
+  const newAccountRank = await computeEloRank(STARTING_ELO);
+  timings.rankQuery = Date.now() - startRank;
+
+  timings.total = Date.now() - startTotal;
+  console.log('[crazyAuth] Timings (ms):', JSON.stringify(timings));
+
+  return res.status(200).json({
+    secret: newUser.secret,
+    username: newUser.username,
+    email: newUser.email,
+    staff: newUser.staff || false,
+    canMakeClues: newUser.canMakeClues || false,
+    accountId: newUser._id,
+    countryCode: null,
+    banned: false,
+    banType: 'none',
+    banExpiresAt: null,
+    banPublicNote: null,
+    pendingNameChange: false,
+    pendingNameChangePublicNote: null,
+    // Extended data defaults for new users
+    totalXp: 0,
+    createdAt: newUser.created_at,
+    gamesLen: 0,
+    lastLogin: newUser.created_at,
+    canChangeUsername: true,
+    daysUntilNameChange: 0,
+    recentChange: false,
+    elo: STARTING_ELO,
+    rank: newAccountRank,
+    league: getLeague(STARTING_ELO),
+    duels_wins: 0,
+    duels_losses: 0,
+    duels_tied: 0,
+    win_rate: 0,
+    // Hand-built literal, spreads nothing: the entitlement defaults have to be
+    // added explicitly or a brand-new CG account gets no shop at all.
+    ...defaultEntitlementFields()
+  });
+}
